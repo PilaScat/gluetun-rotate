@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.1 — 2026-09-14
+
+- A rotation no longer leaves the tunnel stopped. A stop request that timed out never sent
+  the start, and a start refused three times left the tunnel down with every later probe
+  timing out, which never counts. Now the start is always sent, and after a failed rotation
+  the next round starts the tunnel if it is still stopped. A tunnel stopped by hand is left
+  alone.
+- The journal records whether Gluetun confirmed the stop.
+- The watcher survives an unexpected error: it is recorded in the journal and Check status
+  counts it. Before, anything but an API error stopped the watcher until the next channel
+  started.
+- The logo and the README changes made after 0.1.0 are in the release zip.
+- Checked against Dispatcharr 0.31.0: nothing the plugin relies on changed.
+
 ## 0.1.0 — 2026-09-13
 
 First release.
