@@ -1,0 +1,8 @@
+.venv/
+dist/
+__pycache__/
+.runtime/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+scratch_*
