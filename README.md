@@ -97,3 +97,6 @@ pytest && mypy . && ruff check . && python scripts/build_zip.py
 ## License
 
 MIT
+
+The logo is built on Gluetun's own logo, from [qdm12/gluetun](https://github.com/qdm12/gluetun),
+Copyright (c) 2018 Quentin McGaw, MIT licence.
