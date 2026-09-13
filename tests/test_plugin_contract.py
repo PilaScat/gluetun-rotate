@@ -12,27 +12,24 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_NAME = "_dispatcharr_plugin_gluetun_rotate"
 
 ALLOWED_FIELD_TYPES = {"boolean", "number", "string", "text", "select", "info"}
-DISPATCHARR_EVENT_TYPES = {
+PLUGIN_HOOK_EVENTS = {
     "channel_start",
     "channel_stop",
-    "channel_buffering",
-    "channel_failover",
     "channel_reconnect",
     "channel_error",
-    "client_connect",
-    "client_disconnect",
+    "channel_failover",
+    "stream_switch",
     "recording_start",
     "recording_end",
-    "stream_switch",
-    "m3u_refresh",
-    "m3u_download",
     "epg_refresh",
-    "epg_download",
-    "login_success",
+    "epg_error",
+    "m3u_refresh",
+    "m3u_error",
+    "client_connect",
+    "client_disconnect",
     "login_failed",
-    "logout",
-    "m3u_blocked",
     "epg_blocked",
+    "m3u_blocked",
     "vod_start",
     "vod_stop",
 }
@@ -132,10 +129,10 @@ def test_action_labels_and_descriptions_stay_short_and_parallel(manifest):
         assert len(description.split()) <= 13, action["id"]
 
 
-def test_manifest_declares_only_real_dispatcharr_events(manifest):
+def test_manifest_binds_only_events_that_reach_plugin_hooks(manifest):
     for action in manifest["actions"]:
         for event in action.get("events", []):
-            assert event in DISPATCHARR_EVENT_TYPES, event
+            assert event in PLUGIN_HOOK_EVENTS, event
 
 
 def test_manifest_carries_what_the_registry_requires(manifest):
