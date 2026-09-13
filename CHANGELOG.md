@@ -6,8 +6,8 @@ First release.
 
 - Asks every active Xtream Codes account for its `player_api.php` every two minutes, with
   the account's user agent, at no cost in stream connections.
-- Two answers in a row between 520 and 527 rotate Gluetun onto another server through its
-  control server, without recreating Gluetun or Dispatcharr.
+- Two probe rounds in a row in which any account answers between 520 and 527 rotate Gluetun
+  onto another server through its control server, without recreating Gluetun or Dispatcharr.
 - Records the old address, the new one and the provider's next answer in a journal.
 - Guards: ten minutes between rotations, three an hour, and a tunnel that comes back on the
   same address counts as a failure. Answers such as 403, 507 or 509, and timeouts, never
