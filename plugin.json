@@ -1,0 +1,80 @@
+{
+  "name": "Gluetun Rotate",
+  "version": "0.1.0",
+  "description": "Moves Gluetun to another VPN server when the IPTV provider refuses the current exit address.",
+  "author": "PilaScat",
+  "license": "MIT",
+  "source_type": "external",
+  "repo_url": "https://github.com/PilaScat/gluetun-rotate",
+  "help_url": "https://github.com/PilaScat/gluetun-rotate#readme",
+  "source_url": "https://github.com/PilaScat/gluetun-rotate/releases/download/v{version}/gluetun-rotate-{version}.zip",
+  "fields": [
+    {
+      "id": "api_key",
+      "label": "API key *",
+      "type": "string",
+      "default": "",
+      "help_text": "A Dispatcharr API key. Settings → Users → the account whose key you want to use. The watcher needs it to read the provider accounts it asks."
+    },
+    {
+      "id": "gluetun_api_key",
+      "label": "Gluetun key *",
+      "type": "string",
+      "default": "",
+      "help_text": "An API key from Gluetun's control server auth file, for a role allowed GET /v1/publicip/ip, GET /v1/vpn/status and PUT /v1/vpn/status."
+    },
+    {
+      "id": "gluetun_url",
+      "label": "Gluetun URL",
+      "type": "string",
+      "default": "http://127.0.0.1:8000",
+      "help_text": "Gluetun's control server as seen from Dispatcharr. Change it only if HTTP_CONTROL_SERVER_ADDRESS was moved."
+    }
+  ],
+  "actions": [
+    {
+      "id": "apply",
+      "label": "Apply settings",
+      "description": "Applies the settings above and starts the watcher.",
+      "button_label": "Apply",
+      "button_variant": "filled"
+    },
+    {
+      "id": "status",
+      "label": "Check status",
+      "description": "Reports the exit address and what the watcher did recently.",
+      "button_label": "Check",
+      "button_variant": "default"
+    },
+    {
+      "id": "test",
+      "label": "Ask the provider",
+      "description": "Asks every account now, without moving the tunnel.",
+      "button_label": "Ask",
+      "button_variant": "default"
+    },
+    {
+      "id": "restart",
+      "label": "Restart watcher",
+      "description": "Starts the watcher again if it is down.",
+      "button_label": "Restart",
+      "button_variant": "default",
+      "events": [
+        "channel_start"
+      ]
+    },
+    {
+      "id": "remove",
+      "label": "Stop watcher",
+      "description": "Stops the watcher and leaves the tunnel where it is.",
+      "button_label": "Stop",
+      "button_variant": "default",
+      "button_color": "red",
+      "confirm": {
+        "required": true,
+        "title": "Stop the watcher?",
+        "message": "A refused exit address will no longer move Gluetun to another server."
+      }
+    }
+  ]
+}
