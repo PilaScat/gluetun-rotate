@@ -56,7 +56,7 @@ JOURNAL_PATH = RUNTIME_DIR / "gluetun-rotate.jsonl"
 LOG_PATH = RUNTIME_DIR / "watcher.log"
 
 DETACHING_REASONS = frozenset({"disable", "delete"})
-FAILED_EVENTS = frozenset({"failed", "api_error"})
+FAILED_EVENTS = frozenset({"failed", "api_error", "error"})
 
 _heartbeat_lock = threading.Lock()
 _heartbeat_checked_at = 0.0

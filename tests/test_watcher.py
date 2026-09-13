@@ -19,11 +19,19 @@ ACCOUNT = Account(
 
 
 class FakeDispatcharr:
-    def __init__(self, accounts: list[Account] | None = None, fails: bool = False) -> None:
+    def __init__(
+        self,
+        accounts: list[Account] | None = None,
+        fails: bool = False,
+        breaks: bool = False,
+    ) -> None:
         self._accounts = [ACCOUNT] if accounts is None else accounts
         self.fails = fails
+        self.breaks = breaks
 
     def accounts(self) -> list[Account]:
+        if self.breaks:
+            raise ValueError("unknown url type: 'provider.example'")
         if self.fails:
             raise ApiError("GET /api/m3u/accounts/ failed: timed out")
         return list(self._accounts)
@@ -170,6 +178,16 @@ def test_a_tunnel_is_never_started_without_a_rotation_of_ours(tmp_path: Path):
     ticks(watcher, 5)
     assert gluetun.start_checks == 0
     assert "restarted" not in events(journal)
+
+
+def test_an_unexpected_error_is_recorded_and_the_watcher_goes_on(tmp_path: Path):
+    watcher, gluetun, journal = build(tmp_path, Answers(520), FakeDispatcharr(breaks=True))
+    watcher.tick_safely(0.0)
+    watcher.tick_safely(120.0)
+    last = journal.read()[-1]
+    assert last["event"] == "error"
+    assert "ValueError" in last["detail"]
+    assert gluetun.rotations == 0
 
 
 def test_an_unreachable_dispatcharr_is_recorded_once(tmp_path: Path):

@@ -88,10 +88,16 @@ class Watcher:
             "started", interval_seconds=self._interval_seconds, refusals=self._refusals
         )
         while not self._stopping.is_set():
-            self.tick(time.monotonic())
+            self.tick_safely(time.monotonic())
             self._stopping.wait(self._interval_seconds)
         self._journal.write("stopped")
         return 0
+
+    def tick_safely(self, now: float) -> None:
+        try:
+            self.tick(now)
+        except Exception as error:
+            self._journal.write("error", detail=f"{type(error).__name__}: {error}")
 
     def tick(self, now: float) -> None:
         self._restart_a_tunnel_left_stopped()
