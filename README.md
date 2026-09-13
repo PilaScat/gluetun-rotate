@@ -75,7 +75,9 @@ It holds back when:
 - the last rotation was less than ten minutes ago
 - three rotations have already happened in the last hour
 
-A tunnel that comes back on the same address is recorded as a failed rotation.
+A tunnel that comes back on the same address is recorded as a failed rotation. A rotation
+that fails part way can leave the tunnel stopped: the next round finds it stopped and starts
+it again. A tunnel stopped by hand is left alone.
 
 ## What this does not fix
 

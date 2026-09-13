@@ -33,6 +33,7 @@ class FakeGluetun(Gluetun):
         self.status = "running"
         self.calls: list[tuple[str, str, object]] = []
         self.running_failures = 0
+        self.stop_times_out = False
 
     def _call(self, method: str, path: str, body: dict[str, object] | None = None) -> object:
         self.calls.append((method, path, body))
@@ -44,6 +45,9 @@ class FakeGluetun(Gluetun):
         if body == {"status": "running"} and self.running_failures:
             self.running_failures -= 1
             raise ApiError("PUT /v1/vpn/status failed: refused")
+        if body == {"status": "stopped"} and self.stop_times_out:
+            self.status = "stopped"
+            raise ApiError("PUT /v1/vpn/status failed: timed out")
         if body == {"status": "stopped"} and not self.stops:
             return {"outcome": "running"}
         self.status = str((body or {}).get("status"))
@@ -64,8 +68,27 @@ def test_a_rotation_stops_the_tunnel_starts_it_and_reports_the_new_address():
 
 def test_the_tunnel_is_started_again_even_when_it_never_reports_stopped():
     gluetun = FakeGluetun(["1.1.1.1", "2.2.2.2"], stops=False)
-    gluetun.rotate()
+    rotation = gluetun.rotate()
     assert puts(gluetun)[-1] == {"status": "running"}
+    assert rotation.stop_confirmed is False
+
+
+def test_a_stop_request_that_times_out_still_starts_the_tunnel_again():
+    gluetun = FakeGluetun(["1.1.1.1", "2.2.2.2"])
+    gluetun.stop_times_out = True
+    with pytest.raises(ApiError):
+        gluetun.rotate()
+    assert puts(gluetun)[-1] == {"status": "running"}
+    assert gluetun.status == "running"
+
+
+def test_a_stopped_tunnel_is_started_and_a_running_one_left_alone():
+    gluetun = FakeGluetun(["1.1.1.1"])
+    assert gluetun.start_if_stopped() is False
+    assert puts(gluetun) == []
+    gluetun.status = "stopped"
+    assert gluetun.start_if_stopped() is True
+    assert puts(gluetun) == [{"status": "running"}]
 
 
 def test_starting_the_tunnel_again_is_retried():

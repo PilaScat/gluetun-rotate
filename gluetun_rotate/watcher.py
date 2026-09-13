@@ -38,6 +38,8 @@ class AccountSource(Protocol):
 class Rotator(Protocol):
     def rotate(self) -> Rotation: ...
 
+    def start_if_stopped(self) -> bool: ...
+
 
 def arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="gluetun_rotate")
@@ -75,6 +77,7 @@ class Watcher:
         self._reported_no_accounts = False
         self._streak = 0
         self._rotations: deque[float] = deque()
+        self._tunnel_may_be_stopped = False
         self._stopping = threading.Event()
 
     def stop(self, *_: object) -> None:
@@ -91,6 +94,7 @@ class Watcher:
         return 0
 
     def tick(self, now: float) -> None:
+        self._restart_a_tunnel_left_stopped()
         accounts = self._current_accounts(now)
         if not accounts:
             return
@@ -116,6 +120,7 @@ class Watcher:
         try:
             rotation = self._gluetun.rotate()
         except ApiError as error:
+            self._tunnel_may_be_stopped = True
             self._journal.write("failed", detail=str(error))
             return
         if not rotation.moved:
@@ -124,6 +129,7 @@ class Watcher:
                 detail="the exit address did not change",
                 before=rotation.before,
                 after=rotation.after,
+                stop_confirmed=rotation.stop_confirmed,
             )
             return
         self._streak = 0
@@ -131,8 +137,20 @@ class Watcher:
             "rotated",
             before=rotation.before,
             after=rotation.after,
+            stop_confirmed=rotation.stop_confirmed,
             probes=[result.describe() for result in map(self._prober, self._accounts)],
         )
+
+    def _restart_a_tunnel_left_stopped(self) -> None:
+        if not self._tunnel_may_be_stopped:
+            return
+        try:
+            restarted = self._gluetun.start_if_stopped()
+        except ApiError:
+            return
+        self._tunnel_may_be_stopped = False
+        if restarted:
+            self._journal.write("restarted")
 
     def _held_back(self, now: float) -> str:
         while self._rotations and now - self._rotations[0] >= HOUR_SECONDS:

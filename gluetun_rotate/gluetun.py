@@ -14,6 +14,7 @@ RESTART_ATTEMPTS = 3
 class Rotation:
     before: str
     after: str
+    stop_confirmed: bool = True
 
     @property
     def moved(self) -> bool:
@@ -52,12 +53,24 @@ class Gluetun:
 
     def rotate(self) -> Rotation:
         before = self.public_ip()
-        self.set_vpn("stopped")
         try:
-            self._wait_until(lambda: self.vpn_status() == "stopped", self._stop_timeout)
+            self.set_vpn("stopped")
+            stop_confirmed = self._wait_until(
+                lambda: self.vpn_status() == "stopped", self._stop_timeout
+            )
         finally:
             self._start_again()
-        return Rotation(before=before, after=self._wait_for_new_address(before))
+        return Rotation(
+            before=before,
+            after=self._wait_for_new_address(before),
+            stop_confirmed=stop_confirmed,
+        )
+
+    def start_if_stopped(self) -> bool:
+        if self.vpn_status() != "stopped":
+            return False
+        self._start_again()
+        return True
 
     def _start_again(self) -> None:
         for attempt in range(RESTART_ATTEMPTS):

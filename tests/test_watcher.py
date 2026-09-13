@@ -35,15 +35,25 @@ class FakeGluetun:
         self.rotations = 0
         self.moves = True
         self.fails = False
+        self.stopped = False
+        self.start_checks = 0
 
     def rotate(self) -> Rotation:
         if self.fails:
+            self.stopped = True
             raise ApiError("PUT /v1/vpn/status returned 401")
         before = self.address
         self.rotations += 1
         if self.moves:
             self.address = f"198.51.100.{self.rotations}"
         return Rotation(before=before, after=self.address)
+
+    def start_if_stopped(self) -> bool:
+        self.start_checks += 1
+        if not self.stopped:
+            return False
+        self.stopped = False
+        return True
 
 
 class Answers:
@@ -141,6 +151,25 @@ def test_a_control_server_error_is_recorded(tmp_path: Path):
     last = journal.read()[-1]
     assert last["event"] == "failed"
     assert "401" in last["detail"]
+
+
+def test_a_tunnel_left_stopped_by_a_failed_rotation_is_started_again(tmp_path: Path):
+    watcher, gluetun, journal = build(tmp_path, Answers(520, 520, 200))
+    gluetun.fails = True
+    ticks(watcher, 3)
+    names = events(journal)
+    assert names.index("restarted") == names.index("failed") + 1
+    assert gluetun.stopped is False
+    ticks(watcher, 3, start=360)
+    assert gluetun.start_checks == 1
+
+
+def test_a_tunnel_is_never_started_without_a_rotation_of_ours(tmp_path: Path):
+    watcher, gluetun, journal = build(tmp_path, Answers(200))
+    gluetun.stopped = True
+    ticks(watcher, 5)
+    assert gluetun.start_checks == 0
+    assert "restarted" not in events(journal)
 
 
 def test_an_unreachable_dispatcharr_is_recorded_once(tmp_path: Path):
