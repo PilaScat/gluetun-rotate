@@ -61,11 +61,11 @@ both keys, press **Apply**, and press **Ask** to see what the provider answers r
 Every two minutes the watcher asks each active Xtream Codes account for its
 `player_api.php`, with the account's user agent. That request costs no stream connection.
 
-Two answers in a row between 520 and 527, Cloudflare's errors for an origin that would not
-talk to it, count as a refused address. The watcher then stops the tunnel through
-`PUT /v1/vpn/status`, starts it again, waits up to ninety seconds for a different public
-address, and asks the provider once more. The journal records the old address, the new one
-and the answer.
+Two rounds in a row in which any account answers between 520 and 527, Cloudflare's errors
+for an origin that would not talk to it, count as a refused address. The watcher then stops
+the tunnel through `PUT /v1/vpn/status`, starts it again, waits up to ninety seconds for a
+different public address, and asks the provider once more. The journal records the old
+address, the new one and the answer.
 
 Gluetun picks a server at random among those its filters allow each time the tunnel
 starts, which is what makes this work. A filter narrowed to one server leaves nowhere to go.
@@ -74,7 +74,8 @@ It holds back when:
 
 - the last rotation was less than ten minutes ago
 - three rotations have already happened in the last hour
-- the tunnel came back on the same address, which is recorded as a failure
+
+A tunnel that comes back on the same address is recorded as a failed rotation.
 
 ## What this does not fix
 
