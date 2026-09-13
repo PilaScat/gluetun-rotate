@@ -31,7 +31,7 @@ class FakeDispatcharr:
 
 class FakeGluetun:
     def __init__(self) -> None:
-        self.address = "187.13.215.172"
+        self.address = "203.0.113.10"
         self.rotations = 0
         self.moves = True
         self.fails = False
@@ -42,7 +42,7 @@ class FakeGluetun:
         before = self.address
         self.rotations += 1
         if self.moves:
-            self.address = f"187.13.218.{self.rotations}"
+            self.address = f"198.51.100.{self.rotations}"
         return Rotation(before=before, after=self.address)
 
 
@@ -89,8 +89,8 @@ def test_two_refusals_in_a_row_rotate_the_exit_address(tmp_path: Path):
     assert gluetun.rotations == 1
     rotated = journal.read()[-1]
     assert rotated["event"] == "rotated"
-    assert rotated["before"] == "187.13.215.172"
-    assert rotated["after"] == "187.13.218.1"
+    assert rotated["before"] == "203.0.113.10"
+    assert rotated["after"] == "198.51.100.1"
     assert rotated["probes"] == ["Miglior IPTV: HTTP 200"]
 
 

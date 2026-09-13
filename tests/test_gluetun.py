@@ -55,10 +55,10 @@ def puts(gluetun: FakeGluetun) -> list[object]:
 
 
 def test_a_rotation_stops_the_tunnel_starts_it_and_reports_the_new_address():
-    gluetun = FakeGluetun(["187.13.215.172", "187.13.215.172", "187.13.218.69"])
+    gluetun = FakeGluetun(["203.0.113.10", "203.0.113.10", "198.51.100.20"])
     rotation = gluetun.rotate()
     assert puts(gluetun) == [{"status": "stopped"}, {"status": "running"}]
-    assert rotation == Rotation(before="187.13.215.172", after="187.13.218.69")
+    assert rotation == Rotation(before="203.0.113.10", after="198.51.100.20")
     assert rotation.moved is True
 
 
