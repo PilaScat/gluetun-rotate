@@ -42,7 +42,7 @@ both keys, press **Apply**, and press **Ask** to see what the provider answers r
 
 | Setting | What it does |
 |---|---|
-| API key | A Dispatcharr API key, from Settings → Users. The watcher reads the provider accounts with it |
+| API key | A Dispatcharr API key of an **admin** user, from Settings → Users. The watcher reads the provider accounts with it, and Dispatcharr leaves the account password out for anyone else, so those accounts would be skipped as unusable |
 | Gluetun key | The `apikey` of the role above |
 | Gluetun URL | Gluetun's control server as Dispatcharr sees it. The default fits a shared network namespace |
 
@@ -75,6 +75,9 @@ It holds back when:
 - the last rotation was less than ten minutes ago
 - three rotations have already happened in the last hour
 
+A rotation that fails still counts toward both, so a control server that keeps refusing is
+not asked again every two minutes.
+
 A tunnel that comes back on the same address is recorded as a failed rotation. A rotation
 that fails part way can leave the tunnel stopped: the next round finds it stopped and starts
 it again. A tunnel stopped by hand is left alone.
@@ -85,6 +88,13 @@ A provider that is failing on its own. A 403, 507 or 509 means the provider is a
 and saying no, to everyone; a new address would not change that, so those answers never
 trigger a rotation. Neither does a timeout: a tunnel that is down is Gluetun's own
 healthcheck to restart.
+
+Some edges answer 403 to a few streams right after the exit address changes, while
+`player_api.php` still answers 200, so the probe cannot see it. From Dispatcharr 0.31.0, which
+writes its log to `/data/logs/dispatcharr.log`, the watcher counts the `HTTP 403` lines there
+every round and records them in the journal per channel. It only records them: whether a
+rotation would help is for those numbers to show. Check status sums them up; the first
+journal entry says whether the log was found.
 
 A rotation drops every connection through the tunnel for a few seconds. When the address
 is refused nothing is flowing anyway, which is the only time it happens.

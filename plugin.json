@@ -14,7 +14,7 @@
       "label": "API key *",
       "type": "string",
       "default": "",
-      "help_text": "A Dispatcharr API key. Settings → Users → the account whose key you want to use. The watcher needs it to read the provider accounts it asks."
+      "help_text": "A Dispatcharr API key of an admin user, from Settings → Users. Other users do not see the account passwords the watcher needs to ask the provider."
     },
     {
       "id": "gluetun_api_key",
