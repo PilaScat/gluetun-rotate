@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1 — 2026-09-14
+
+- The 10-minute cooldown and the limit of 3 rotations an hour hold across a restart of the
+  watcher. The rotations of the last hour lived only in memory, so an Apply, a plugin reload
+  or a restart of Dispatcharr let the watcher rotate again at once. They are now kept in
+  `.runtime/rotations.json` and read back on the watcher's first round. The review of the
+  registry submission found it.
+- README: a manual install unzips the release into `/data/plugins`, since the archive holds
+  the `gluetun-rotate` folder; Check status reports how many rounds had HTTP 403s and the
+  counts of the last one, not a sum; a rotation also drops the streams of an account that
+  still answers.
+
 ## 0.2.0 — 2026-09-14
 
 - Records the provider's HTTP 403s. Some edges answer 403 to a few streams right after the
