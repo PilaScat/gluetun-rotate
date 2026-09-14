@@ -47,6 +47,27 @@ def test_a_file_replaced_underneath_is_read_from_its_start(tmp_path: Path):
     assert list(tailer.read()) == ["after rotation", "and more"]
 
 
+def test_a_replacement_that_reuses_the_inode_is_read_from_its_start(tmp_path: Path):
+    path = tmp_path / "dispatcharr.log"
+    path.write_text("first\n", encoding="utf-8")
+    tailer = Tailer(path)
+    list(tailer.read())
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write("after rotation\nand more\n")
+    assert list(tailer.read()) == ["after rotation", "and more"]
+
+
+def test_a_file_that_only_grows_is_never_read_twice(tmp_path: Path):
+    path = tmp_path / "dispatcharr.log"
+    path.write_text("", encoding="utf-8")
+    tailer = Tailer(path)
+    list(tailer.read())
+    for index in range(40):
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"line {index:02d} " + "x" * 20 + "\n")
+        assert list(tailer.read()) == [f"line {index:02d} " + "x" * 20]
+
+
 def test_a_missing_file_is_not_an_error(tmp_path: Path):
     assert list(Tailer(tmp_path / "absent.log").read()) == []
 
