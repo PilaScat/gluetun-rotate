@@ -14,13 +14,18 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
   watcher saw two 520 rounds and rotated again on its own, 3.5 minutes after the bad address.
 - **403s are only recorded**, from Dispatcharr's own log (`/data/logs/dispatcharr.log`, from
   Dispatcharr 0.31.0), per channel and per round. Whether a rotation would help them is for the
-  journal to show.
+  journal to show. The probe cannot see them: on 13 September 2026 some streams got 403 from the
+  edge while `player_api.php` answered 200.
 - **A tunnel left stopped by a failed rotation is started again** on the next round. A tunnel
   stopped by hand is never touched.
 
 ## Traps
 
 - The API key must be an admin's: `/api/m3u/accounts/` leaves the password out for anyone else.
+- The 403 line has two shapes: with the reservoarr profile `Stream process error for channel
+  <uuid>: [delaybuf] upstream error HTTPError: HTTP Error 403`, with the built-in proxy
+  `HTTP 403 from <url>`, without a uuid. The stream named in a `forbidden` event is the one the
+  channel is on when the round reads it, which may not be the one that answered 403.
 - Gluetun needs a role for this plugin in its auth file, with `GET /v1/publicip/ip`,
   `GET /v1/vpn/status` and `PUT /v1/vpn/status`. Its control server is `127.0.0.1:8000` from
   inside the shared network namespace.
