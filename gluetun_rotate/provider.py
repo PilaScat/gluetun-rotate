@@ -4,6 +4,7 @@ import urllib.parse
 from dataclasses import dataclass
 
 from .constants import PROBE_TIMEOUT_SECONDS, REFUSED_STATUSES
+from .forbidden import Streaming, feed_of
 from .web import ApiError, fetch, request_json
 
 XTREAM_CODES = "XC"
@@ -89,6 +90,19 @@ class Dispatcharr:
                 )
             )
         return found
+
+    def streaming(self) -> list[Streaming]:
+        payload = self._get("/proxy/ts/status")
+        rows = payload.get("channels", []) if isinstance(payload, dict) else []
+        return [
+            Streaming(
+                channel=str(row.get("channel_id") or ""),
+                name=str(row.get("channel_name") or ""),
+                feed=feed_of(str(row.get("url") or "")),
+            )
+            for row in rows
+            if isinstance(row, dict)
+        ]
 
     def _default_user_agent(self) -> str:
         for row in _rows(self._get("/api/core/settings/")):

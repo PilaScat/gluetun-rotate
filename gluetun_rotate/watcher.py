@@ -15,6 +15,7 @@ from .constants import (
     ACCOUNTS_REFRESH_SECONDS,
     API_KEY_ENV,
     DEFAULT_API_URL,
+    DEFAULT_DISPATCHARR_LOG,
     DEFAULT_GLUETUN_URL,
     GLUETUN_KEY_ENV,
     MAX_RECENT_EVENTS,
@@ -23,9 +24,11 @@ from .constants import (
     REFUSALS_BEFORE_ROTATING,
     ROTATION_COOLDOWN_SECONDS,
 )
+from .forbidden import Streaming, count_forbidden, describe
 from .gluetun import Gluetun, Rotation
 from .journal import Journal
 from .provider import Account, Dispatcharr, Probe, probe
+from .tailer import Tailer
 from .web import ApiError
 
 HOUR_SECONDS = 3600.0
@@ -33,6 +36,8 @@ HOUR_SECONDS = 3600.0
 
 class AccountSource(Protocol):
     def accounts(self) -> list[Account]: ...
+
+    def streaming(self) -> list[Streaming]: ...
 
 
 class Rotator(Protocol):
@@ -45,6 +50,7 @@ def arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="gluetun_rotate")
     parser.add_argument("--api-url", default=DEFAULT_API_URL)
     parser.add_argument("--gluetun-url", default=DEFAULT_GLUETUN_URL)
+    parser.add_argument("--dispatcharr-log", default=DEFAULT_DISPATCHARR_LOG)
     parser.add_argument("--journal", required=True)
     return parser.parse_args(argv)
 
@@ -61,6 +67,7 @@ class Watcher:
         cooldown_seconds: float = ROTATION_COOLDOWN_SECONDS,
         rotations_per_hour: int = MAX_ROTATIONS_PER_HOUR,
         accounts_refresh_seconds: float = ACCOUNTS_REFRESH_SECONDS,
+        stream_log: Tailer | None = None,
     ) -> None:
         self._dispatcharr = dispatcharr
         self._gluetun = gluetun
@@ -71,6 +78,7 @@ class Watcher:
         self._cooldown_seconds = cooldown_seconds
         self._rotations_per_hour = max(rotations_per_hour, 1)
         self._accounts_refresh_seconds = accounts_refresh_seconds
+        self._stream_log = stream_log
         self._accounts: list[Account] = []
         self._accounts_at: float | None = None
         self._accounts_failing = False
@@ -85,7 +93,10 @@ class Watcher:
 
     def run(self) -> int:
         self._journal.write(
-            "started", interval_seconds=self._interval_seconds, refusals=self._refusals
+            "started",
+            interval_seconds=self._interval_seconds,
+            refusals=self._refusals,
+            stream_log=self._stream_log_status(),
         )
         while not self._stopping.is_set():
             self.tick_safely(time.monotonic())
@@ -101,6 +112,7 @@ class Watcher:
 
     def tick(self, now: float) -> None:
         self._restart_a_tunnel_left_stopped()
+        self._record_forbidden()
         accounts = self._current_accounts(now)
         if not accounts:
             return
@@ -158,6 +170,27 @@ class Watcher:
         if restarted:
             self._journal.write("restarted")
 
+    def _record_forbidden(self) -> None:
+        if self._stream_log is None:
+            return
+        counts = count_forbidden(self._stream_log.read())
+        if not counts:
+            return
+        try:
+            streaming = self._dispatcharr.streaming()
+        except ApiError:
+            streaming = []
+        self._journal.write(
+            "forbidden", total=sum(counts.values()), channels=describe(counts, streaming)
+        )
+
+    def _stream_log_status(self) -> str:
+        if self._stream_log is None:
+            return "off"
+        if not self._stream_log.path.is_file():
+            return f"missing: {self._stream_log.path}"
+        return str(self._stream_log.path)
+
     def _held_back(self, now: float) -> str:
         while self._rotations and now - self._rotations[0] >= HOUR_SECONDS:
             self._rotations.popleft()
@@ -198,6 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         Dispatcharr(options.api_url, api_key),
         Gluetun(options.gluetun_url, gluetun_key),
         Journal(Path(options.journal), MAX_RECENT_EVENTS),
+        stream_log=Tailer(Path(options.dispatcharr_log)),
     )
     for name in ("SIGTERM", "SIGINT"):
         number = getattr(signal, name, None)

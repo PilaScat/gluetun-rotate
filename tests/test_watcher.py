@@ -3,11 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from gluetun_rotate.forbidden import Streaming
 from gluetun_rotate.gluetun import Rotation
 from gluetun_rotate.journal import Journal
 from gluetun_rotate.provider import Account, Probe
+from gluetun_rotate.tailer import Tailer
 from gluetun_rotate.watcher import Watcher, main
 from gluetun_rotate.web import ApiError
+
+UNO = "e8c1a821-d151-40df-8b7a-5b9cbf19d88f"
+FORBIDDEN_LINE = (
+    f"2026-09-13 13:58:04,112 +0200 ERROR live_proxy.manager Stream process error for channel "
+    f"{UNO}: [delaybuf] upstream error HTTPError: HTTP Error 403: Forbidden; retry in 2s"
+)
 
 ACCOUNT = Account(
     name="Miglior IPTV",
@@ -35,6 +43,9 @@ class FakeDispatcharr:
         if self.fails:
             raise ApiError("GET /api/m3u/accounts/ failed: timed out")
         return list(self._accounts)
+
+    def streaming(self) -> list[Streaming]:
+        return [Streaming(channel=UNO, name="Sky Sport Uno FHD", feed="202121.ts")]
 
 
 class FakeGluetun:
@@ -216,3 +227,43 @@ def test_the_watcher_refuses_to_start_without_both_keys(monkeypatch):
     monkeypatch.delenv("GLUETUN_ROTATE_API_KEY", raising=False)
     monkeypatch.setenv("GLUETUN_ROTATE_GLUETUN_KEY", "k")
     assert main(["--journal", "x"]) == 2
+
+
+def test_403s_in_the_dispatcharr_log_are_recorded_and_never_rotate(tmp_path: Path):
+    log = tmp_path / "dispatcharr.log"
+    log.write_text("before the watcher\n", encoding="utf-8")
+    journal = Journal(tmp_path / "journal.jsonl", 200)
+    gluetun = FakeGluetun()
+    watcher = Watcher(
+        FakeDispatcharr(), gluetun, journal, prober=Answers(200), stream_log=Tailer(log)
+    )
+    watcher.tick(0.0)
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(FORBIDDEN_LINE + "\n" + FORBIDDEN_LINE + "\n")
+    ticks(watcher, 3, start=120.0)
+    forbidden = [row for row in journal.read() if row["event"] == "forbidden"]
+    assert forbidden == [
+        {
+            "at": forbidden[0]["at"],
+            "event": "forbidden",
+            "total": 2,
+            "channels": [{"channel": "Sky Sport Uno FHD", "feed": "202121.ts", "count": 2}],
+        }
+    ]
+    assert gluetun.rotations == 0
+
+
+def test_the_start_says_when_the_dispatcharr_log_is_missing(tmp_path: Path):
+    journal = Journal(tmp_path / "journal.jsonl", 200)
+    watcher = Watcher(
+        FakeDispatcharr(),
+        FakeGluetun(),
+        journal,
+        prober=Answers(200),
+        stream_log=Tailer(tmp_path / "absent.log"),
+    )
+    watcher.stop()
+    watcher.run()
+    started = journal.read()[0]
+    assert started["event"] == "started"
+    assert started["stream_log"].startswith("missing: ")

@@ -145,6 +145,7 @@ class Plugin:
         records = Journal(JOURNAL_PATH, MAX_RECENT_EVENTS).read()
         rotations = [row for row in records if row.get("event") == "rotated"]
         failed = [row for row in records if row.get("event") in FAILED_EVENTS]
+        forbidden = [row for row in records if row.get("event") == "forbidden"]
 
         if not state.get("applied"):
             headline = "Not applied yet. Fill in both keys and press Apply."
@@ -158,12 +159,19 @@ class Plugin:
             parts.append("No rotation yet.")
         if failed:
             parts.append(f"{len(failed)} error(s) in the journal.")
+        if forbidden:
+            last = ", ".join(
+                f"{row.get('channel')} x{row.get('count')}"
+                for row in forbidden[-1].get("channels") or []
+            )
+            parts.append(f"HTTP 403 in {len(forbidden)} round(s), last on {last}.")
 
         return {
             "status": "ok" if running or not state.get("applied") else "error",
             "message": " ".join(part for part in parts if part),
             "running": running,
             "rotations": len(rotations),
+            "forbidden_rounds": len(forbidden),
             "events": records[-MAX_RECENT_EVENTS:],
         }
 
