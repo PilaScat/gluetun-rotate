@@ -107,7 +107,7 @@ pytest && mypy . && ruff check . && python scripts/build_zip.py
 ```
 
 The same four checks run in CI on every push. Decisions, traps and the release routine are in
-[docs/MEMORY.md](docs/MEMORY.md).
+[docs/MEMORY.md](https://github.com/PilaScat/gluetun-rotate/blob/master/docs/MEMORY.md).
 
 ## License
 
