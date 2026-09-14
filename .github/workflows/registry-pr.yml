@@ -1,0 +1,146 @@
+name: registry-pr
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to open the registry PR for (e.g. v0.4.0). Must already be released."
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: registry-pr-${{ github.event.inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: Dispatcharr/Plugins
+  FORK: PilaScat/Plugins
+  SLUG: gluetun-rotate
+  REPO: PilaScat/gluetun-rotate
+
+jobs:
+  registry-pr:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+
+      - name: Open or refresh the Dispatcharr/Plugins registry PR
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          GH_TOKEN: ${{ secrets.REGISTRY_PR_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::REGISTRY_PR_TOKEN secret is not set. Create a classic PAT on the PilaScat account scoped to 'public_repo' only and add it as the REGISTRY_PR_TOKEN repo secret."
+            exit 1
+          fi
+
+          if [[ ! "$RAW_TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::notice::'$RAW_TAG' is not a vX.Y.Z release tag; nothing to do"
+            exit 0
+          fi
+          TAG="$RAW_TAG"
+          VERSION="${TAG#v}"
+          BRANCH="update-$SLUG-$VERSION"
+          MANIFEST="plugins/$SLUG/plugin.json"
+          README="plugins/$SLUG/README.md"
+          ASSET_URL="https://github.com/$REPO/releases/download/$TAG/$SLUG-$VERSION.zip"
+
+          PACKAGED=$(jq -r .version plugin.json)
+          if [ "$PACKAGED" != "$VERSION" ]; then
+            echo "::error::plugin.json at $TAG says $PACKAGED, not $VERSION"
+            exit 1
+          fi
+
+          for attempt in 1 2 3 4 5; do
+            if curl -sfIL "$ASSET_URL" >/dev/null; then break; fi
+            echo "release asset not reachable yet (attempt $attempt); retrying in 10s"
+            sleep 10
+            if [ "$attempt" = 5 ]; then
+              echo "::error::release asset $ASSET_URL is not reachable"
+              exit 1
+            fi
+          done
+
+          BASE_SHA=$(gh api "repos/$UPSTREAM/git/ref/heads/main" --jq .object.sha)
+
+          gh api "repos/$UPSTREAM/contents/$MANIFEST?ref=$BASE_SHA" > manifest_meta.json
+          MANIFEST_SHA=$(jq -r .sha manifest_meta.json)
+          jq -r .content manifest_meta.json | base64 -d > manifest.orig
+          PUBLISHED=$(jq -r .version manifest.orig)
+          echo "registry has $PUBLISHED, release is $VERSION"
+
+          HIGHEST=$(printf '%s\n%s\n' "$PUBLISHED" "$VERSION" | sort -V | tail -1)
+          if [ "$PUBLISHED" = "$VERSION" ] || [ "$HIGHEST" != "$VERSION" ]; then
+            echo "::notice::registry is already at $PUBLISHED (>= $VERSION); no PR needed"
+            exit 0
+          fi
+
+          if [ -n "$(gh pr list --repo "$UPSTREAM" --head "${FORK%%/*}:$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            echo "::notice::an open registry PR for $BRANCH already exists; leaving it"
+            exit 0
+          fi
+
+          python3 - manifest.orig manifest.new "$VERSION" <<'PY'
+          import re, sys
+          src_path, out_path, version = sys.argv[1], sys.argv[2], sys.argv[3]
+          src = open(src_path).read()
+          new, n = re.subn(r'("version"\s*:\s*)"[^"]*"', r'\1"%s"' % version, src, count=1)
+          if n != 1:
+              sys.exit("expected exactly one version field, replaced %d" % n)
+          open(out_path, "w").write(new)
+          PY
+
+          README_SHA=$(gh api "repos/$UPSTREAM/contents/$README?ref=$BASE_SHA" --jq .sha 2>/dev/null || true)
+
+          if gh api "repos/$FORK/git/ref/heads/$BRANCH" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$FORK/git/refs/heads/$BRANCH" -f sha="$BASE_SHA" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$FORK/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$BASE_SHA" >/dev/null
+          fi
+
+          gh api -X PUT "repos/$FORK/contents/$MANIFEST" \
+            -f message="[$SLUG] Update to $VERSION" \
+            -f content="$(base64 -w0 manifest.new)" \
+            -f sha="$MANIFEST_SHA" \
+            -f branch="$BRANCH" >/dev/null
+
+          if ! cmp -s README.md <(gh api "repos/$UPSTREAM/contents/$README?ref=$BASE_SHA" --jq .content 2>/dev/null | base64 -d); then
+            gh api -X PUT "repos/$FORK/contents/$README" \
+              -f message="[$SLUG] README for $VERSION" \
+              -f content="$(base64 -w0 README.md)" \
+              ${README_SHA:+-f sha="$README_SHA"} \
+              -f branch="$BRANCH" >/dev/null
+          fi
+
+          NOTES=$(awk -v v="$VERSION" '
+            $0 ~ "^## " v "( |$)" { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md)
+          ZIP_SHA=$(curl -sL "$ASSET_URL" | sha256sum | awk '{print $1}')
+          BT=$(printf '\140')
+
+          {
+            printf "## About this submission\n\nUpdate of an existing external plugin, ${BT}%s${BT} → ${BT}%s${BT}.\n\n" "$PUBLISHED" "$VERSION"
+            printf '%s\n\n' "$NOTES"
+            printf -- '- Source: https://github.com/%s\n' "$REPO"
+            printf -- '- Release: https://github.com/%s/releases/tag/%s\n' "$REPO" "$TAG"
+            printf -- '- Changelog: https://github.com/%s/blob/%s/CHANGELOG.md\n' "$REPO" "$TAG"
+            printf -- "- Zip sha256: ${BT}%s${BT}\n\n" "$ZIP_SHA"
+            printf "_Opened by ${BT}registry-pr.yml${BT} in %s when %s was released._\n" "$REPO" "$TAG"
+          } > body.md
+
+          gh pr create \
+            --repo "$UPSTREAM" \
+            --head "${FORK%%/*}:$BRANCH" \
+            --base main \
+            --title "[$SLUG] Update to $VERSION" \
+            --body-file body.md
