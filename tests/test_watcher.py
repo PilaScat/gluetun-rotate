@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from gluetun_rotate.forbidden import Streaming
@@ -152,6 +153,30 @@ def test_no_more_than_three_rotations_an_hour(tmp_path: Path):
     assert "hourly limit reached" in [row.get("reason") for row in journal.read()]
     ticks(watcher, 10, start=3600 + 30 * 120, step=120)
     assert gluetun.rotations > 3
+
+
+def test_the_limits_hold_across_a_restart_of_the_watcher(tmp_path: Path):
+    first, gluetun, _ = build(tmp_path, Answers(520))
+    ticks(first, 30, step=120)
+    assert gluetun.rotations == 3
+
+    second, gluetun, journal = build(tmp_path, Answers(520))
+    ticks(second, 10, start=50_000.0, step=120)
+    assert gluetun.rotations == 0
+    reasons = {row.get("reason") for row in journal.read() if row["event"] == "skipped"}
+    assert reasons == {"cooling down after the last rotation", "hourly limit reached"}
+
+
+def test_a_rotation_older_than_an_hour_is_forgotten_on_restart(tmp_path: Path):
+    (tmp_path / "rotations.json").write_text(
+        json.dumps({"rotations": [time.time() - 3700, "broken"]}), encoding="utf-8"
+    )
+    watcher, gluetun, _ = build(tmp_path, Answers(520, 520, 200))
+    ticks(watcher, 2)
+    assert gluetun.rotations == 1
+    stored = json.loads((tmp_path / "rotations.json").read_text(encoding="utf-8"))
+    assert len(stored["rotations"]) == 1
+    assert abs(stored["rotations"][0] - time.time()) < 60
 
 
 def test_a_tunnel_that_comes_back_on_the_same_address_is_a_failure(tmp_path: Path):

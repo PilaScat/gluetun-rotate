@@ -28,10 +28,12 @@ from .forbidden import Streaming, count_forbidden, describe
 from .gluetun import Gluetun, Rotation
 from .journal import Journal
 from .provider import Account, Dispatcharr, Probe, probe
+from .state import load, save
 from .tailer import Tailer
 from .web import ApiError
 
 HOUR_SECONDS = 3600.0
+ROTATIONS_FILE = "rotations.json"
 
 
 class AccountSource(Protocol):
@@ -85,6 +87,8 @@ class Watcher:
         self._reported_no_accounts = False
         self._streak = 0
         self._rotations: deque[float] = deque()
+        self._rotations_path = journal.path.with_name(ROTATIONS_FILE)
+        self._recalled = self._recall_rotations()
         self._tunnel_may_be_stopped = False
         self._stopping = threading.Event()
 
@@ -111,6 +115,7 @@ class Watcher:
             self._journal.write("error", detail=f"{type(error).__name__}: {error}")
 
     def tick(self, now: float) -> None:
+        self._restore_rotations(now)
         self._restart_a_tunnel_left_stopped()
         self._record_forbidden()
         accounts = self._current_accounts(now)
@@ -135,6 +140,7 @@ class Watcher:
             self._journal.write("skipped", reason=reason)
             return
         self._rotations.append(now)
+        self._keep_rotations(now)
         try:
             rotation = self._gluetun.rotate()
         except ApiError as error:
@@ -199,6 +205,37 @@ class Watcher:
         if len(self._rotations) >= self._rotations_per_hour:
             return "hourly limit reached"
         return ""
+
+    def _recall_rotations(self) -> list[float]:
+        stored = load(self._rotations_path).get("rotations")
+        if not isinstance(stored, list):
+            return []
+        return sorted(float(moment) for moment in stored if isinstance(moment, int | float))
+
+    def _restore_rotations(self, now: float) -> None:
+        if not self._recalled:
+            return
+        wall = time.time()
+        restored = [
+            now - (wall - moment)
+            for moment in self._recalled
+            if 0 <= wall - moment < HOUR_SECONDS
+        ]
+        self._rotations = deque([*restored, *self._rotations])
+        self._recalled = []
+
+    def _keep_rotations(self, now: float) -> None:
+        wall = time.time()
+        save(
+            self._rotations_path,
+            {
+                "rotations": [
+                    wall - (now - moment)
+                    for moment in self._rotations
+                    if now - moment < HOUR_SECONDS
+                ]
+            },
+        )
 
     def _current_accounts(self, now: float) -> list[Account]:
         due = (
