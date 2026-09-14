@@ -106,6 +106,9 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 pytest && mypy . && ruff check . && python scripts/build_zip.py
 ```
 
+The same four checks run in CI on every push. Decisions, traps and the release routine are in
+[docs/MEMORY.md](docs/MEMORY.md).
+
 ## License
 
 MIT
