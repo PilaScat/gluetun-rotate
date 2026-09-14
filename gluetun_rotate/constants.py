@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 PLUGIN_NAME = "Gluetun Rotate"
-PLUGIN_VERSION = "0.1.1"
+PLUGIN_VERSION = "0.2.0"
 PLUGIN_DESCRIPTION = (
     "Moves Gluetun to another VPN server when the IPTV provider refuses the current exit "
     "address."

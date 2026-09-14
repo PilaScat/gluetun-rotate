@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0 — 2026-09-14
+
+- Records the provider's HTTP 403s. Some edges answer 403 to a few streams right after the
+  exit address changes while `player_api.php` still answers 200, so the probe never sees
+  them. From Dispatcharr 0.31.0, which writes its log to `/data/logs/dispatcharr.log`, the
+  watcher follows that file and records a `forbidden` event every round with the count per
+  channel. It never rotates on them. Check status sums them up, and the `started` event says
+  whether the log was found.
+- The README and the API key field say the key must belong to an admin: Dispatcharr leaves
+  the account password out for anyone else. A failed rotation counts toward the cooldown
+  and the hourly limit.
+- The contract tests run the plugin's actions against a temporary runtime folder instead of
+  the checkout. Tests, types, lint and build run in CI; `docs/MEMORY.md` holds the
+  decisions, the deployment traps and the release routine.
+
 ## 0.1.1 — 2026-09-14
 
 - A rotation no longer leaves the tunnel stopped. A stop request that timed out never sent
