@@ -18,6 +18,17 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
   edge while `player_api.php` answered 200.
 - **A tunnel left stopped by a failed rotation is started again** on the next round. A tunnel
   stopped by hand is never touched.
+- **Viewers hold the rotation back, with no time limit** (0.3.0, asked for by the operator on
+  20 September 2026). A rotation drops every connection through the tunnel, and a stream that
+  is still flowing when the probe is refused belongs to someone watching: cutting it to cure
+  channels nobody is on is a bad trade. The test is `/proxy/ts/status`: `client_count > 0` and
+  a source whose host is not local. The fallback card is served from `127.0.0.1`, so a channel
+  sitting on it never holds the tunnel. A status that cannot be read does **not** hold it
+  either: an unreachable Dispatcharr would otherwise block the cure for ever, and the watcher
+  lives in the same container.
+- **A held-back rotation is journalled once per reason.** With no time limit the same line
+  could repeat every two minutes for hours; the reason is remembered and written again only
+  when it changes.
 
 ## Traps
 

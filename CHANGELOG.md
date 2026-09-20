@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 — 2026-09-20
+
+- **A rotation waits for the last viewer.** Rotating drops every connection through the
+  tunnel, so anyone watching a channel from the provider lost their stream even though it
+  was working. The watcher now reads `/proxy/ts/status` before it rotates and holds back
+  while a channel has viewers on a source that is not local: the fallback card served from
+  `127.0.0.1` does not count, because nothing is flowing from the provider there anyway. It
+  rotates on the first round after the last of them leaves. There is no time limit: an
+  address the provider refuses is of no use to anyone but the people already watching.
+- A held-back rotation is written to the journal **once per reason**, not every round, so a
+  long wait no longer fills it with the same line.
+
 ## 0.2.1 — 2026-09-14
 
 - The 10-minute cooldown and the limit of 3 rotations an hour hold across a restart of the
