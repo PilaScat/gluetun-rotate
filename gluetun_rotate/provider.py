@@ -99,6 +99,8 @@ class Dispatcharr:
                 channel=str(row.get("channel_id") or ""),
                 name=str(row.get("channel_name") or ""),
                 feed=feed_of(str(row.get("url") or "")),
+                url=str(row.get("url") or ""),
+                clients=_as_int(row.get("client_count")) or 0,
             )
             for row in rows
             if isinstance(row, dict)

@@ -23,6 +23,8 @@ class Streaming:
     channel: str
     name: str
     feed: str
+    url: str = ""
+    clients: int = 0
 
 
 def feed_of(url: str) -> str:

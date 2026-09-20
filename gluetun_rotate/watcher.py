@@ -30,6 +30,7 @@ from .journal import Journal
 from .provider import Account, Dispatcharr, Probe, probe
 from .state import load, save
 from .tailer import Tailer
+from .viewers import describe_watched, watched
 from .web import ApiError
 
 HOUR_SECONDS = 3600.0
@@ -90,6 +91,7 @@ class Watcher:
         self._rotations_path = journal.path.with_name(ROTATIONS_FILE)
         self._recalled = self._recall_rotations()
         self._tunnel_may_be_stopped = False
+        self._skipped_for = ""
         self._stopping = threading.Event()
 
     def stop(self, *_: object) -> None:
@@ -137,8 +139,11 @@ class Watcher:
     def _rotate(self, now: float) -> None:
         reason = self._held_back(now)
         if reason:
-            self._journal.write("skipped", reason=reason)
+            if reason != self._skipped_for:
+                self._journal.write("skipped", reason=reason)
+                self._skipped_for = reason
             return
+        self._skipped_for = ""
         self._rotations.append(now)
         self._keep_rotations(now)
         try:
@@ -198,6 +203,9 @@ class Watcher:
         return str(self._stream_log.path)
 
     def _held_back(self, now: float) -> str:
+        viewers = self._watching()
+        if viewers:
+            return f"someone is watching {describe_watched(viewers)}"
         while self._rotations and now - self._rotations[0] >= HOUR_SECONDS:
             self._rotations.popleft()
         if self._rotations and now - self._rotations[-1] < self._cooldown_seconds:
@@ -205,6 +213,12 @@ class Watcher:
         if len(self._rotations) >= self._rotations_per_hour:
             return "hourly limit reached"
         return ""
+
+    def _watching(self) -> list[Streaming]:
+        try:
+            return watched(self._dispatcharr.streaming())
+        except ApiError:
+            return []
 
     def _recall_rotations(self) -> list[float]:
         stored = load(self._rotations_path).get("rotations")

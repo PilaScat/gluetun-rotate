@@ -37,6 +37,8 @@ class FakeDispatcharr:
         self._accounts = [ACCOUNT] if accounts is None else accounts
         self.fails = fails
         self.breaks = breaks
+        self.streams: list[Streaming] = []
+        self.streaming_fails = False
 
     def accounts(self) -> list[Account]:
         if self.breaks:
@@ -46,6 +48,10 @@ class FakeDispatcharr:
         return list(self._accounts)
 
     def streaming(self) -> list[Streaming]:
+        if self.streaming_fails:
+            raise ApiError("GET /proxy/ts/status failed: timed out")
+        if self.streams:
+            return list(self.streams)
         return [Streaming(channel=UNO, name="Sky Sport Uno FHD", feed="202121.ts")]
 
 
@@ -292,3 +298,57 @@ def test_the_start_says_when_the_dispatcharr_log_is_missing(tmp_path: Path):
     started = journal.read()[0]
     assert started["event"] == "started"
     assert started["stream_log"].startswith("missing: ")
+
+
+WATCHING = Streaming(
+    channel=UNO,
+    name="Sky | Sport Uno",
+    feed="202121.ts",
+    url="http://provider.example/live/user/pass/202121.ts",
+    clients=2,
+)
+ON_THE_CARD = Streaming(
+    channel="a61b949d-0000-0000-0000-000000000000",
+    name="Sky | Sport 260",
+    feed="slate.ts",
+    url="http://127.0.0.1:9721/slate.ts",
+    clients=1,
+)
+
+
+def test_nobody_is_dropped_while_they_are_watching_a_real_source(tmp_path: Path):
+    dispatcharr = FakeDispatcharr()
+    dispatcharr.streams = [WATCHING]
+    watcher, gluetun, journal = build(tmp_path, Answers(520), dispatcharr)
+    ticks(watcher, 6, step=120)
+    assert gluetun.rotations == 0
+    skipped = [row for row in journal.read() if row["event"] == "skipped"]
+    assert len(skipped) == 1
+    assert skipped[0]["reason"] == "someone is watching Sky | Sport Uno"
+
+
+def test_it_rotates_as_soon_as_the_last_viewer_leaves(tmp_path: Path):
+    dispatcharr = FakeDispatcharr()
+    dispatcharr.streams = [WATCHING]
+    watcher, gluetun, _ = build(tmp_path, Answers(520), dispatcharr)
+    ticks(watcher, 4, step=120)
+    assert gluetun.rotations == 0
+    dispatcharr.streams = [ON_THE_CARD]
+    ticks(watcher, 2, start=480, step=120)
+    assert gluetun.rotations == 1
+
+
+def test_a_channel_on_the_card_does_not_hold_the_tunnel(tmp_path: Path):
+    dispatcharr = FakeDispatcharr()
+    dispatcharr.streams = [ON_THE_CARD]
+    watcher, gluetun, _ = build(tmp_path, Answers(520), dispatcharr)
+    ticks(watcher, 2)
+    assert gluetun.rotations == 1
+
+
+def test_a_status_that_cannot_be_read_does_not_hold_the_tunnel_for_ever(tmp_path: Path):
+    dispatcharr = FakeDispatcharr()
+    dispatcharr.streaming_fails = True
+    watcher, gluetun, _ = build(tmp_path, Answers(520), dispatcharr)
+    ticks(watcher, 2)
+    assert gluetun.rotations == 1
