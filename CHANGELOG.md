@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0 — 2026-10-07
+
+- **A source behind Cloudflare's block page rotates the tunnel in one round.** The provider
+  sends each exit address to an edge of its choosing, and on 6 October 2026 the edge given to
+  one address answered the five US news sources with Cloudflare's "Website Access Blocked"
+  page, while `player_api.php` and the other edges still answered: the probe saw nothing and
+  the channels stayed on their fallback. From the same server without the VPN, and from the VPN
+  after a new address, the same sources answered 200. For a 403 in the Dispatcharr log the
+  watcher now asks for the URL the channel was trying, reading at most 16 KB and closing at
+  once a source that opens; the block page is journalled as `blocked`, with the feed and the
+  edge, and the tunnel rotates without waiting for a second round. The source is asked again
+  every round until it opens (`unblocked`), so a new address that is blocked too is replaced
+  as well. Any other 403 is still only recorded.
+- **Two minutes between rotations**, down from ten, so that second replacement comes on the
+  next round. The limit of three an hour stays.
+- Viewers still hold every rotation back. Measured on 7 October with a probe viewer through
+  reservoarr: the stream went dry for 11.6 s, because the old connection is never reset and
+  reservoarr reconnects only after 25 s without data, and the new address was refused with
+  520, which sent the channel to its fallback.
+
 ## 0.3.0 — 2026-09-20
 
 - **A rotation waits for the last viewer.** Rotating drops every connection through the
