@@ -54,7 +54,9 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
 - Gluetun needs a role for this plugin in its auth file, with `GET /v1/publicip/ip`,
   `GET /v1/vpn/status` and `PUT /v1/vpn/status`. Its control server is `127.0.0.1:8000` from
   inside the shared network namespace.
-- A failed rotation counts toward the 10-minute cooldown and the 3-an-hour limit. Both survive
+- **The cooldown is 2 minutes** (0.4.0, chosen by the operator on 7 October 2026; 10 minutes
+  before): a new address that is blocked too is replaced on the next round.
+- A failed rotation counts toward the 2-minute cooldown and the 3-an-hour limit. Both survive
   a restart of the watcher (0.2.1): the last hour of rotations is kept in
   `.runtime/rotations.json` as wall-clock times and mapped onto the watcher's monotonic clock
   on its first round, not read from the journal, which is trimmed to 50 lines.

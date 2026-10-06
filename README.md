@@ -90,7 +90,7 @@ It holds back when:
   The fallback card, served from `127.0.0.1`, does not count — nothing is flowing from the
   provider there. There is no time limit, and a status that cannot be read does not hold the
   tunnel.
-- the last rotation was less than ten minutes ago
+- the last rotation was less than two minutes ago
 - three rotations have already happened in the last hour
 
 A rotation that fails still counts toward both time limits, so a control server that keeps

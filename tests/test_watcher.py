@@ -145,10 +145,12 @@ def test_a_provider_failing_on_its_own_never_moves_the_tunnel(tmp_path: Path):
 
 def test_a_second_rotation_waits_for_the_cooldown(tmp_path: Path):
     watcher, gluetun, journal = build(tmp_path, Answers(520))
-    ticks(watcher, 4, step=120)
+    ticks(watcher, 4, step=30)
     assert gluetun.rotations == 1
     assert journal.read()[-1]["reason"] == "cooling down after the last rotation"
-    ticks(watcher, 3, start=720, step=120)
+    ticks(watcher, 1, start=120)
+    assert gluetun.rotations == 1
+    ticks(watcher, 1, start=150)
     assert gluetun.rotations == 2
 
 
@@ -167,7 +169,7 @@ def test_the_limits_hold_across_a_restart_of_the_watcher(tmp_path: Path):
     assert gluetun.rotations == 3
 
     second, gluetun, journal = build(tmp_path, Answers(520))
-    ticks(second, 10, start=50_000.0, step=120)
+    ticks(second, 10, start=50_000.0, step=60)
     assert gluetun.rotations == 0
     reasons = {row.get("reason") for row in journal.read() if row["event"] == "skipped"}
     assert reasons == {"cooling down after the last rotation", "hourly limit reached"}
@@ -424,8 +426,8 @@ def test_a_403_that_is_not_the_block_page_does_not_rotate(tmp_path: Path):
 def test_the_blocked_source_is_checked_again_until_it_opens(tmp_path: Path):
     checks = Checks(True, True, False)
     watcher, gluetun, journal = with_refusal(tmp_path, checks)
-    ticks(watcher, 6, start=120.0, step=120.0)
-    assert gluetun.rotations == 1
+    ticks(watcher, 4, start=120.0, step=120.0)
+    assert gluetun.rotations == 2
     assert len(checks.asked) == 3
     assert events(journal).count("unblocked") == 1
 
