@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import urllib.error
 import urllib.parse
+import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
-from .constants import PROBE_TIMEOUT_SECONDS, REFUSED_STATUSES
+from .constants import (
+    BLOCK_CHECK_BYTES,
+    BLOCK_PAGE_MARKER,
+    PROBE_TIMEOUT_SECONDS,
+    REFUSED_STATUSES,
+)
 from .forbidden import Streaming, feed_of
 from .web import ApiError, fetch, request_json
 
@@ -46,6 +55,44 @@ def probe(account: Account, timeout: float = PROBE_TIMEOUT_SECONDS) -> Probe:
     except ApiError as error:
         return Probe(account=account.name, status=None, detail=str(error))
     return Probe(account=account.name, status=response.status)
+
+
+@dataclass(frozen=True)
+class SourceCheck:
+    feed: str
+    edge: str
+    status: int | None
+    blocked: bool = False
+    detail: str = ""
+
+
+def check_source(
+    url: str,
+    user_agent: str,
+    timeout: float = PROBE_TIMEOUT_SECONDS,
+    opener: Callable[..., Any] = urllib.request.urlopen,
+) -> SourceCheck:
+    feed = feed_of(url)
+    headers = {"User-Agent": user_agent} if user_agent else {}
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with opener(request, timeout=timeout) as response:
+            return SourceCheck(feed=feed, edge=_host(response.geturl()), status=response.status)
+    except urllib.error.HTTPError as error:
+        body = error.read(BLOCK_CHECK_BYTES) or b""
+        return SourceCheck(
+            feed=feed,
+            edge=_host(error.geturl() or url),
+            status=int(error.code),
+            blocked=error.code == 403 and BLOCK_PAGE_MARKER in body,
+        )
+    except (urllib.error.URLError, OSError) as error:
+        reason = getattr(error, "reason", error)
+        return SourceCheck(feed=feed, edge=_host(url), status=None, detail=str(reason))
+
+
+def _host(url: str) -> str:
+    return urllib.parse.urlparse(url).hostname or ""
 
 
 def _rows(payload: object) -> list[dict]:

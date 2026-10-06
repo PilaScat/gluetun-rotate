@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
+import urllib.error
 import urllib.parse
 
 import pytest
 
 from gluetun_rotate import provider
-from gluetun_rotate.provider import Account, Dispatcharr, Probe, probe
+from gluetun_rotate.provider import Account, Dispatcharr, Probe, check_source, probe
 from gluetun_rotate.web import ApiError, Response
 
 ACCOUNT = Account(
@@ -110,3 +112,80 @@ def test_only_active_xtream_accounts_with_credentials_are_probed(monkeypatch):
         ("Miglior IPTV", "TiviMate/5.1.6 (Android 12)"),
         ("Backup", "VLC/3.0.21 LibVLC/3.0.21"),
     ]
+
+
+SOURCE = "http://provider.example/live/user/pass/690608.ts"
+EDGE = "http://blocked.example/live/play/token/690608"
+BLOCK_PAGE = b"<html><head><title>Website Access Blocked</title></head><body>Error HTTP 403</body>"
+
+
+class Opened:
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.status = 200
+        self.read_bytes = 0
+
+    def geturl(self) -> str:
+        return self.url
+
+    def read(self, size: int = -1) -> bytes:
+        self.read_bytes += 1
+        return b"\x47" * 188
+
+    def __enter__(self) -> Opened:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+
+def refusing(body: bytes, code: int = 403):
+    def opener(request, timeout=0.0):
+        raise urllib.error.HTTPError(EDGE, code, "Forbidden", {}, io.BytesIO(body))
+
+    return opener
+
+
+def test_the_cloudflare_block_page_marks_the_source_blocked():
+    check = check_source(SOURCE, "VLC/3.0.20", opener=refusing(BLOCK_PAGE))
+    assert check.blocked is True
+    assert check.status == 403
+    assert check.feed == "690608.ts"
+    assert check.edge == "blocked.example"
+
+
+def test_a_plain_403_is_not_a_block():
+    check = check_source(SOURCE, "VLC/3.0.20", opener=refusing(b"Forbidden"))
+    assert check.blocked is False
+    assert check.status == 403
+
+
+def test_the_block_page_text_with_another_status_is_not_a_block():
+    check = check_source(SOURCE, "VLC/3.0.20", opener=refusing(BLOCK_PAGE, code=503))
+    assert check.blocked is False
+
+
+def test_an_open_source_is_closed_without_reading_the_stream():
+    opened = Opened("http://open.example/live/play/token/690608")
+    seen = {}
+
+    def opener(request, timeout=0.0):
+        seen["agent"] = request.get_header("User-agent")
+        return opened
+
+    check = check_source(SOURCE, "VLC/3.0.20", opener=opener)
+    assert check.status == 200
+    assert check.blocked is False
+    assert check.edge == "open.example"
+    assert opened.read_bytes == 0
+    assert seen["agent"] == "VLC/3.0.20"
+
+
+def test_an_unreachable_source_is_reported_without_raising():
+    def opener(request, timeout=0.0):
+        raise urllib.error.URLError("Name or service not known")
+
+    check = check_source(SOURCE, "", opener=opener)
+    assert check.status is None
+    assert check.blocked is False
+    assert "Name or service not known" in check.detail

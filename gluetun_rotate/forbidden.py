@@ -10,6 +10,9 @@ RESERVOARR_FORBIDDEN = re.compile(
     r"Stream process error for channel (?P<channel>[0-9a-f-]{36}): .*\bHTTP Error 403\b"
 )
 PROXY_FORBIDDEN = re.compile(r"\bHTTP 403 from (?P<url>\S+)")
+ATTEMPT = re.compile(
+    r"Connection attempt \d+/\d+ for URL: (?P<url>\S+) for channel (?P<channel>[0-9a-f-]{36})"
+)
 
 
 @dataclass(frozen=True)
@@ -64,3 +67,21 @@ def describe(counts: Counter[Source], streaming: Iterable[Streaming]) -> list[di
             }
         )
     return rows
+
+
+def refused_urls(lines: Iterable[str]) -> list[str]:
+    attempted: dict[str, str] = {}
+    refused: dict[str, None] = {}
+    for line in lines:
+        attempt = ATTEMPT.search(line)
+        if attempt:
+            attempted[attempt.group("channel")] = attempt.group("url")
+            continue
+        found = RESERVOARR_FORBIDDEN.search(line)
+        if found and found.group("channel") in attempted:
+            refused[attempted[found.group("channel")]] = None
+            continue
+        proxied = PROXY_FORBIDDEN.search(line)
+        if proxied:
+            refused[proxied.group("url")] = None
+    return list(refused)

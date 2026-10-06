@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from gluetun_rotate.forbidden import Source, Streaming, count_forbidden, describe, forbidden_source
+from gluetun_rotate.forbidden import (
+    Source,
+    Streaming,
+    count_forbidden,
+    describe,
+    forbidden_source,
+    refused_urls,
+)
 
 UNO = "e8c1a821-d151-40df-8b7a-5b9cbf19d88f"
 RESERVOARR_403 = (
@@ -49,3 +56,26 @@ def test_a_source_no_longer_streaming_keeps_what_the_log_said():
         {"channel": UNO, "feed": "", "count": 1},
         {"channel": "", "feed": "202121.ts", "count": 1},
     ]
+
+
+SOURCE = "http://provider.example/live/u/p/690608.ts"
+ATTEMPT = (
+    "2026-10-06 23:32:50,249 +0200 INFO live_proxy.manager Connection attempt 1/3 for URL: "
+    f"{SOURCE} for channel {UNO}"
+)
+
+
+def test_a_reservoarr_403_is_traced_to_the_url_last_attempted_on_its_channel():
+    assert refused_urls([ATTEMPT, RESERVOARR_403, RESERVOARR_403]) == [SOURCE]
+
+
+def test_a_403_without_a_known_attempt_names_no_url():
+    assert refused_urls([RESERVOARR_403]) == []
+
+
+def test_the_proxy_403_carries_its_own_url():
+    assert refused_urls([PROXY_403]) == ["http://provider.example/live/u/p/202121.ts"]
+
+
+def test_other_errors_name_no_url():
+    assert refused_urls([ATTEMPT, RESERVOARR_520]) == []

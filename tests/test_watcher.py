@@ -7,7 +7,7 @@ from pathlib import Path
 from gluetun_rotate.forbidden import Streaming
 from gluetun_rotate.gluetun import Rotation
 from gluetun_rotate.journal import Journal
-from gluetun_rotate.provider import Account, Probe
+from gluetun_rotate.provider import Account, Probe, SourceCheck
 from gluetun_rotate.tailer import Tailer
 from gluetun_rotate.watcher import Watcher, main
 from gluetun_rotate.web import ApiError
@@ -352,3 +352,96 @@ def test_a_status_that_cannot_be_read_does_not_hold_the_tunnel_for_ever(tmp_path
     watcher, gluetun, _ = build(tmp_path, Answers(520), dispatcharr)
     ticks(watcher, 2)
     assert gluetun.rotations == 1
+
+
+SOURCE = "http://provider.example/live/user/s3cret-pass/690608.ts"
+ATTEMPT_LINE = (
+    f"2026-10-06 23:32:50,249 +0200 INFO live_proxy.manager Connection attempt 1/3 for URL: "
+    f"{SOURCE} for channel {UNO}"
+)
+
+
+class Checks:
+    def __init__(self, *blocked: bool) -> None:
+        self.answers = list(blocked)
+        self.last = blocked[-1] if blocked else False
+        self.asked: list[tuple[str, str]] = []
+
+    def __call__(self, url: str, agent: str) -> SourceCheck:
+        self.asked.append((url, agent))
+        blocked = self.answers.pop(0) if self.answers else self.last
+        return SourceCheck(
+            feed="690608.ts",
+            edge="blocked.example" if blocked else "open.example",
+            status=403 if blocked else 200,
+            blocked=blocked,
+        )
+
+
+def with_refusal(
+    tmp_path: Path, checks: Checks, dispatcharr: FakeDispatcharr | None = None
+) -> tuple[Watcher, FakeGluetun, Journal]:
+    log = tmp_path / "dispatcharr.log"
+    log.write_text("before the watcher\n", encoding="utf-8")
+    journal = Journal(tmp_path / "journal.jsonl", 200)
+    gluetun = FakeGluetun()
+    watcher = Watcher(
+        dispatcharr or FakeDispatcharr(),
+        gluetun,
+        journal,
+        prober=Answers(200),
+        stream_log=Tailer(log),
+        checker=checks,
+    )
+    watcher.tick(0.0)
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(ATTEMPT_LINE + "\n" + FORBIDDEN_LINE + "\n")
+    return watcher, gluetun, journal
+
+
+def test_a_source_behind_the_block_page_rotates_in_one_round(tmp_path: Path):
+    checks = Checks(True, False)
+    watcher, gluetun, journal = with_refusal(tmp_path, checks)
+    watcher.tick(120.0)
+    assert gluetun.rotations == 1
+    assert checks.asked == [(SOURCE, ACCOUNT.user_agent)]
+    rows = journal.read()
+    blocked = next(row for row in rows if row["event"] == "blocked")
+    assert blocked["feed"] == "690608.ts"
+    assert blocked["edge"] == "blocked.example"
+    assert rows[-1]["event"] == "rotated"
+    assert rows[-1]["cause"] == "blocked"
+    assert "s3cret-pass" not in (tmp_path / "journal.jsonl").read_text(encoding="utf-8")
+
+
+def test_a_403_that_is_not_the_block_page_does_not_rotate(tmp_path: Path):
+    watcher, gluetun, journal = with_refusal(tmp_path, Checks(False))
+    ticks(watcher, 3, start=120.0)
+    assert gluetun.rotations == 0
+    assert "blocked" not in events(journal)
+
+
+def test_the_blocked_source_is_checked_again_until_it_opens(tmp_path: Path):
+    checks = Checks(True, True, False)
+    watcher, gluetun, journal = with_refusal(tmp_path, checks)
+    ticks(watcher, 6, start=120.0, step=120.0)
+    assert gluetun.rotations == 1
+    assert len(checks.asked) == 3
+    assert events(journal).count("unblocked") == 1
+
+
+def test_a_blocked_source_waits_while_someone_watches_the_provider(tmp_path: Path):
+    dispatcharr = FakeDispatcharr()
+    dispatcharr.streams = [
+        Streaming(
+            channel="other",
+            name="Rai 1",
+            feed="460468.ts",
+            url="http://provider.example/live/user/pass/460468.ts",
+            clients=1,
+        )
+    ]
+    watcher, gluetun, journal = with_refusal(tmp_path, Checks(True), dispatcharr)
+    ticks(watcher, 3, start=120.0)
+    assert gluetun.rotations == 0
+    assert journal.read()[-1]["reason"] == "someone is watching Rai 1"

@@ -18,19 +18,20 @@ from .constants import (
     DEFAULT_DISPATCHARR_LOG,
     DEFAULT_GLUETUN_URL,
     GLUETUN_KEY_ENV,
+    MAX_BLOCK_CHECKS,
     MAX_RECENT_EVENTS,
     MAX_ROTATIONS_PER_HOUR,
     PROBE_INTERVAL_SECONDS,
     REFUSALS_BEFORE_ROTATING,
     ROTATION_COOLDOWN_SECONDS,
 )
-from .forbidden import Streaming, count_forbidden, describe
+from .forbidden import Streaming, count_forbidden, describe, refused_urls
 from .gluetun import Gluetun, Rotation
 from .journal import Journal
-from .provider import Account, Dispatcharr, Probe, probe
+from .provider import Account, Dispatcharr, Probe, SourceCheck, check_source, probe
 from .state import load, save
 from .tailer import Tailer
-from .viewers import describe_watched, watched
+from .viewers import describe_watched, from_the_provider, watched
 from .web import ApiError
 
 HOUR_SECONDS = 3600.0
@@ -71,6 +72,7 @@ class Watcher:
         rotations_per_hour: int = MAX_ROTATIONS_PER_HOUR,
         accounts_refresh_seconds: float = ACCOUNTS_REFRESH_SECONDS,
         stream_log: Tailer | None = None,
+        checker: Callable[[str, str], SourceCheck] = check_source,
     ) -> None:
         self._dispatcharr = dispatcharr
         self._gluetun = gluetun
@@ -82,6 +84,8 @@ class Watcher:
         self._rotations_per_hour = max(rotations_per_hour, 1)
         self._accounts_refresh_seconds = accounts_refresh_seconds
         self._stream_log = stream_log
+        self._checker = checker
+        self._blocked: dict[str, SourceCheck] = {}
         self._accounts: list[Account] = []
         self._accounts_at: float | None = None
         self._accounts_failing = False
@@ -119,24 +123,45 @@ class Watcher:
     def tick(self, now: float) -> None:
         self._restore_rotations(now)
         self._restart_a_tunnel_left_stopped()
-        self._record_forbidden()
+        refused_sources = self._record_forbidden()
         accounts = self._current_accounts(now)
         if not accounts:
             return
+        blocked = self._check_blocked(refused_sources, accounts)
         refused = [result for result in map(self._prober, accounts) if result.refused]
-        if not refused:
+        if refused:
+            self._streak += 1
+            self._journal.write(
+                "refused", streak=self._streak, probes=[result.describe() for result in refused]
+            )
+        else:
             if self._streak >= self._refusals:
                 self._journal.write("accepted", after_refusals=self._streak)
             self._streak = 0
-            return
-        self._streak += 1
-        self._journal.write(
-            "refused", streak=self._streak, probes=[result.describe() for result in refused]
-        )
         if self._streak >= self._refusals:
-            self._rotate(now)
+            self._rotate(now, cause="refused")
+        elif blocked:
+            self._rotate(now, cause="blocked")
 
-    def _rotate(self, now: float) -> None:
+    def _check_blocked(self, refused_sources: list[str], accounts: list[Account]) -> bool:
+        agent = accounts[0].user_agent
+        candidates = list(self._blocked) + [
+            url for url in refused_sources if url not in self._blocked
+        ]
+        for url in candidates[:MAX_BLOCK_CHECKS]:
+            check = self._checker(url, agent)
+            if check.blocked:
+                if url not in self._blocked:
+                    self._journal.write("blocked", feed=check.feed, edge=check.edge)
+                self._blocked[url] = check
+            elif url in self._blocked:
+                del self._blocked[url]
+                self._journal.write(
+                    "unblocked", feed=check.feed, edge=check.edge, status=check.status
+                )
+        return bool(self._blocked)
+
+    def _rotate(self, now: float, cause: str) -> None:
         reason = self._held_back(now)
         if reason:
             if reason != self._skipped_for:
@@ -164,6 +189,7 @@ class Watcher:
         self._streak = 0
         self._journal.write(
             "rotated",
+            cause=cause,
             before=rotation.before,
             after=rotation.after,
             stop_confirmed=rotation.stop_confirmed,
@@ -181,12 +207,13 @@ class Watcher:
         if restarted:
             self._journal.write("restarted")
 
-    def _record_forbidden(self) -> None:
+    def _record_forbidden(self) -> list[str]:
         if self._stream_log is None:
-            return
-        counts = count_forbidden(self._stream_log.read())
+            return []
+        lines = list(self._stream_log.read())
+        counts = count_forbidden(lines)
         if not counts:
-            return
+            return []
         try:
             streaming = self._dispatcharr.streaming()
         except ApiError:
@@ -194,6 +221,7 @@ class Watcher:
         self._journal.write(
             "forbidden", total=sum(counts.values()), channels=describe(counts, streaming)
         )
+        return [url for url in refused_urls(lines) if from_the_provider(url)]
 
     def _stream_log_status(self) -> str:
         if self._stream_log is None:
