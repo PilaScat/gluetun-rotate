@@ -61,7 +61,7 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
   `.runtime/rotations.json` as wall-clock times and mapped onto the watcher's monotonic clock
   on its first round, not read from the journal, which is trimmed to 50 lines.
 - Dispatcharr passes `params` to `run()`, never in `context`, and only the events in
-  `apps/connect/models.py:SUPPORTED_EVENTS` reach a plugin (19 in 0.31.0).
+  `apps/connect/models.py:SUPPORTED_EVENTS` reach a plugin (20 in 0.32.0).
 - `process.py`, `journal.py`, `state.py` and `tailer.py` are copies of Underfed's: every zip has
   to stand on its own. A fix in one belongs in both.
 - Importing a zip with `overwrite=true` replaces the folder, `.runtime/` included: copy it out

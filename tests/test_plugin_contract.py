@@ -17,6 +17,7 @@ PLUGIN_HOOK_EVENTS = {
     "channel_stop",
     "channel_reconnect",
     "channel_error",
+    "channel_buffering",
     "channel_failover",
     "stream_switch",
     "recording_start",
