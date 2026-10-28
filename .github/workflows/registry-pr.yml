@@ -84,7 +84,9 @@ jobs:
             exit 0
           fi
 
-          if [ -n "$(gh pr list --repo "$UPSTREAM" --head "${FORK%%/*}:$BRANCH" --state open --json number --jq '.[].number')" ]; then
+          OPEN=$(gh pr list --repo "$UPSTREAM" --head "$BRANCH" --state open --json number,headRepositoryOwner \
+            --jq ".[] | select(.headRepositoryOwner.login == \"${FORK%%/*}\") | .number")
+          if [ -n "$OPEN" ]; then
             echo "::notice::an open registry PR for $BRANCH already exists; leaving it"
             exit 0
           fi
