@@ -74,8 +74,8 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
 3. `python scripts/build_zip.py`, then an annotated tag `vX.Y.Z` named `Gluetun Rotate X.Y.Z`.
 4. A GitHub Release with the CHANGELOG text, the list of commits it contains, and the zip.
 5. Publishing the Release starts `.github/workflows/registry-pr.yml`, which opens the PR to
-   `Dispatcharr/Plugins` from the `PilaScat/Plugins` fork: the version in
-   `plugins/gluetun-rotate/plugin.json`, the README next to it when it changed, and the
+   `Dispatcharr/Plugins` from the `PilaScat/Plugins` fork: the version and the description of
+   `plugin.json` in `plugins/gluetun-rotate/plugin.json`, the README next to it when it changed, and the
    CHANGELOG section as the description. It needs the `REGISTRY_PR_TOKEN` secret, a classic PAT
    of PilaScat with `public_repo` only; it can be rerun by hand with the tag. The registry
    installs the zip at `source_url`, so a README change reaches users only with a new version.

@@ -91,14 +91,18 @@ jobs:
             exit 0
           fi
 
-          python3 - manifest.orig manifest.new "$VERSION" <<'PY'
-          import re, sys
-          src_path, out_path, version = sys.argv[1], sys.argv[2], sys.argv[3]
-          src = open(src_path).read()
-          new, n = re.subn(r'("version"\s*:\s*)"[^"]*"', r'\1"%s"' % version, src, count=1)
-          if n != 1:
-              sys.exit("expected exactly one version field, replaced %d" % n)
-          open(out_path, "w").write(new)
+          python3 - manifest.orig manifest.new "$VERSION" plugin.json <<'PY'
+          import json, re, sys
+          src_path, out_path, version, packaged_path = sys.argv[1:5]
+          src = open(src_path, encoding="utf-8").read()
+          description = json.load(open(packaged_path, encoding="utf-8"))["description"]
+          for field, value in (("version", version), ("description", description)):
+              pattern = r'("%s"\s*:\s*)"(?:[^"\\]|\\.)*"' % field
+              quoted = json.dumps(value, ensure_ascii=False)
+              src, n = re.subn(pattern, lambda m: m.group(1) + quoted, src, count=1)
+              if n != 1:
+                  sys.exit("expected exactly one %s field, replaced %d" % (field, n))
+          open(out_path, "w", encoding="utf-8", newline="\n").write(src)
           PY
 
           README_SHA=$(gh api "repos/$UPSTREAM/contents/$README?ref=$BASE_SHA" --jq .sha 2>/dev/null || true)
