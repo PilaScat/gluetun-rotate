@@ -37,24 +37,38 @@ class Probe:
     account: str
     status: int | None
     detail: str = ""
+    reset: bool = False
+    count_resets: bool = False
 
     @property
     def refused(self) -> bool:
+        if self.status is None:
+            return self.reset and self.count_resets
         return self.status in REFUSED_STATUSES
 
     def describe(self) -> str:
+        if self.status is None and self.reset:
+            return f"{self.account}: connection reset ({self.detail})"
         if self.status is None:
             return f"{self.account}: no answer ({self.detail})"
         return f"{self.account}: HTTP {self.status}"
 
 
-def probe(account: Account, timeout: float = PROBE_TIMEOUT_SECONDS) -> Probe:
+def probe(
+    account: Account, timeout: float = PROBE_TIMEOUT_SECONDS, count_resets: bool = False
+) -> Probe:
     headers = {"User-Agent": account.user_agent} if account.user_agent else {}
     try:
         response = fetch(account.probe_url(), headers=headers, timeout=timeout)
     except ApiError as error:
-        return Probe(account=account.name, status=None, detail=str(error))
-    return Probe(account=account.name, status=response.status)
+        return Probe(
+            account=account.name,
+            status=None,
+            detail=str(error),
+            reset=error.reset,
+            count_resets=count_resets,
+        )
+    return Probe(account=account.name, status=response.status, count_resets=count_resets)
 
 
 @dataclass(frozen=True)

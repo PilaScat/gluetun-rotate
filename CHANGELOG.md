@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **A reset connection can count as a refusal, behind a new setting that is off by default.**
+  A provider that is not behind Cloudflare never answers 520-527, and some refuse an exit
+  address by resetting the connection instead, so the refusal went unseen. With **Count a
+  reset connection as a refusal** on, a `player_api.php` probe that is reset or refused counts
+  as a refused round; the two rounds in a row, the cooldown, the hourly limit and the wait for
+  viewers are unchanged. **Ask** reports such an answer as refused too.
+
 ## 0.4.0 — 2026-10-07
 
 - **A source behind Cloudflare's block page rotates the tunnel in one round.** The provider

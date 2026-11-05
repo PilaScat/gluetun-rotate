@@ -11,8 +11,18 @@ from .constants import API_TIMEOUT_SECONDS, USER_AGENT
 ERROR_BODY_CHARS = 200
 
 
+RESET_ERRORS = (
+    ConnectionResetError,
+    ConnectionAbortedError,
+    BrokenPipeError,
+    ConnectionRefusedError,
+)
+
+
 class ApiError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, reset: bool = False) -> None:
+        super().__init__(message)
+        self.reset = reset
 
 
 @dataclass(frozen=True)
@@ -41,7 +51,9 @@ def fetch(
         return Response(status=int(error.code), body=error.read()[:ERROR_BODY_CHARS])
     except (urllib.error.URLError, OSError) as error:
         reason = getattr(error, "reason", error)
-        raise ApiError(f"{method} failed: {reason}") from error
+        raise ApiError(
+            f"{method} failed: {reason}", reset=isinstance(reason, RESET_ERRORS)
+        ) from error
 
 
 def request_json(
@@ -54,7 +66,7 @@ def request_json(
     try:
         response = fetch(f"{base_url.rstrip('/')}{path}", method, headers, body)
     except ApiError as error:
-        raise ApiError(f"{method} {path} failed: {error}") from error
+        raise ApiError(f"{method} {path} failed: {error}", reset=error.reset) from error
     if not 200 <= response.status < 300:
         detail = response.body.decode("utf-8", "ignore").strip()
         raise ApiError(f"{method} {path} returned {response.status} {detail}".strip())
