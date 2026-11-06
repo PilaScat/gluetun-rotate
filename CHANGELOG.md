@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-11-06
 
 - **A reset connection can count as a refusal, behind a new setting that is off by default.**
   A provider that is not behind Cloudflare never answers 520-527, and some refuse an exit

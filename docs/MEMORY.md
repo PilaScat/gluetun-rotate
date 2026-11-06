@@ -11,7 +11,7 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
   provider failing with a good address.
 - **The probe is `player_api.php`**, which costs no stream connection.
 - **A reset connection counts as a refusal only when the operator turns it on** (`count_resets`,
-  Unreleased). Some providers not behind Cloudflare refuse an exit address with a TCP reset on
+  0.5.0). Some providers not behind Cloudflare refuse an exit address with a TCP reset on
   every request, `player_api.php` included, while another address is served. It is opt-in
   because a reset can just as well be a provider down for everyone, which the 12 September
   evidence says not to rotate against. It is read on the `player_api.php` probe only, not on
