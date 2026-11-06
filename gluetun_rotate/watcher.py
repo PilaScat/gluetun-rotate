@@ -8,6 +8,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Sequence
+from functools import partial
 from pathlib import Path
 from typing import Protocol
 
@@ -56,6 +57,7 @@ def arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gluetun-url", default=DEFAULT_GLUETUN_URL)
     parser.add_argument("--dispatcharr-log", default=DEFAULT_DISPATCHARR_LOG)
     parser.add_argument("--journal", required=True)
+    parser.add_argument("--count-resets", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -65,7 +67,7 @@ class Watcher:
         dispatcharr: AccountSource,
         gluetun: Rotator,
         journal: Journal,
-        prober: Callable[[Account], Probe] = probe,
+        prober: Callable[[Account], Probe] | None = None,
         interval_seconds: float = PROBE_INTERVAL_SECONDS,
         refusals: int = REFUSALS_BEFORE_ROTATING,
         cooldown_seconds: float = ROTATION_COOLDOWN_SECONDS,
@@ -73,11 +75,13 @@ class Watcher:
         accounts_refresh_seconds: float = ACCOUNTS_REFRESH_SECONDS,
         stream_log: Tailer | None = None,
         checker: Callable[[str, str], SourceCheck] = check_source,
+        count_resets: bool = False,
     ) -> None:
         self._dispatcharr = dispatcharr
         self._gluetun = gluetun
         self._journal = journal
-        self._prober = prober
+        self._prober = prober or partial(probe, count_resets=count_resets)
+        self._count_resets = count_resets
         self._interval_seconds = interval_seconds
         self._refusals = max(refusals, 1)
         self._cooldown_seconds = cooldown_seconds
@@ -107,6 +111,7 @@ class Watcher:
             interval_seconds=self._interval_seconds,
             refusals=self._refusals,
             stream_log=self._stream_log_status(),
+            count_resets=self._count_resets,
         )
         while not self._stopping.is_set():
             self.tick_safely(time.monotonic())
@@ -311,6 +316,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         Gluetun(options.gluetun_url, gluetun_key),
         Journal(Path(options.journal), MAX_RECENT_EVENTS),
         stream_log=Tailer(Path(options.dispatcharr_log)),
+        count_resets=options.count_resets,
     )
     for name in ("SIGTERM", "SIGINT"):
         number = getattr(signal, name, None)

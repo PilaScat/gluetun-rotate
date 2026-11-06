@@ -10,6 +10,14 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
   507, 509 and timeouts never rotate: on the evidence of 12 September 2026 those were the
   provider failing with a good address.
 - **The probe is `player_api.php`**, which costs no stream connection.
+- **A reset connection counts as a refusal only when the operator turns it on** (`count_resets`,
+  Unreleased). Some providers not behind Cloudflare refuse an exit address with a TCP reset on
+  every request, `player_api.php` included, while another address is served. It is opt-in
+  because a reset can just as well be a provider down for everyone, which the 12 September
+  evidence says not to rotate against. It is read on the `player_api.php` probe only, not on
+  streams, so it costs no connection; and it feeds the same two-round streak as a 520, so one
+  reset in passing never rotates, and the cooldown, the hourly limit and the viewer hold bound
+  the cost of a provider that resets everyone.
 - **The rotation is Gluetun's `PUT /v1/vpn/status`** stopped then running, never a container
   restart. Tried live on 14 September 2026: 3.4 s, a new address. That address was refused; the
   watcher saw two 520 rounds and rotated again on its own, 3.5 minutes after the bad address.

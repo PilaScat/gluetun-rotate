@@ -6,9 +6,9 @@ import urllib.parse
 
 import pytest
 
-from gluetun_rotate import provider
+from gluetun_rotate import provider, web
 from gluetun_rotate.provider import Account, Dispatcharr, Probe, check_source, probe
-from gluetun_rotate.web import ApiError, Response
+from gluetun_rotate.web import ApiError, Response, fetch
 
 ACCOUNT = Account(
     name="Miglior IPTV",
@@ -60,6 +60,52 @@ def test_a_probe_without_an_answer_is_reported_without_the_credentials(monkeypat
     assert result.refused is False
     assert "p@ss" not in result.describe()
     assert "user" not in result.describe().replace("Miglior IPTV", "")
+
+
+def resetting(error: Exception):
+    def fake_fetch(url, headers=None, timeout=0.0, **_):
+        raise ApiError(f"GET failed: {error}", reset=isinstance(error, ConnectionError))
+
+    return fake_fetch
+
+
+def test_a_reset_connection_counts_only_when_resets_are_counted(monkeypatch):
+    monkeypatch.setattr(provider, "fetch", resetting(ConnectionResetError(104, "reset by peer")))
+    assert probe(ACCOUNT).refused is False
+    counted = probe(ACCOUNT, count_resets=True)
+    assert counted.refused is True
+    assert counted.describe().startswith("Miglior IPTV: connection reset (")
+    assert "p@ss" not in counted.describe()
+
+
+def test_a_timeout_is_never_a_refused_address(monkeypatch):
+    monkeypatch.setattr(provider, "fetch", resetting(TimeoutError("timed out")))
+    assert probe(ACCOUNT, count_resets=True).refused is False
+
+
+def test_a_cloudflare_refusal_counts_with_or_without_resets(monkeypatch):
+    monkeypatch.setattr(provider, "fetch", lambda url, **_: Response(status=520, body=b""))
+    assert probe(ACCOUNT).refused is True
+    assert probe(ACCOUNT, count_resets=True).refused is True
+
+
+@pytest.mark.parametrize(
+    ("cause", "reset"),
+    [
+        (ConnectionResetError(104, "Connection reset by peer"), True),
+        (urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")), True),
+        (urllib.error.URLError(TimeoutError("timed out")), False),
+        (urllib.error.URLError("Name or service not known"), False),
+    ],
+)
+def test_fetch_tells_a_reset_connection_apart(monkeypatch, cause, reset):
+    def opener(request, timeout=0.0):
+        raise cause
+
+    monkeypatch.setattr(web.urllib.request, "urlopen", opener)
+    with pytest.raises(ApiError) as raised:
+        fetch("http://provider.example/player_api.php")
+    assert raised.value.reset is reset
 
 
 ROUTES = {

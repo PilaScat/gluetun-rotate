@@ -87,6 +87,12 @@ def _as_text(value: object, fallback: str) -> str:
     return text or fallback
 
 
+def _as_flag(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"true", "1", "on", "yes"}
+
+
 class Plugin:
     name = _MANIFEST.get("name", PLUGIN_NAME)
     version = _MANIFEST.get("version", PLUGIN_VERSION)
@@ -183,7 +189,8 @@ class Plugin:
         accounts = Dispatcharr(DEFAULT_API_URL, key).accounts()
         if not accounts:
             return {"status": "error", "message": "No active Xtream Codes account to ask."}
-        results = [probe(account) for account in accounts]
+        count_resets = _as_flag(settings.get("count_resets"))
+        results = [probe(account, count_resets=count_resets) for account in accounts]
         answers = "; ".join(result.describe() for result in results)
         verdict = (
             "The provider refuses this address."
@@ -247,7 +254,7 @@ class Plugin:
         return _as_text(settings.get("gluetun_url"), DEFAULT_GLUETUN_URL)
 
     def _arguments(self, settings: dict) -> list[str]:
-        return [
+        arguments = [
             "--api-url",
             DEFAULT_API_URL,
             "--gluetun-url",
@@ -255,6 +262,9 @@ class Plugin:
             "--journal",
             str(JOURNAL_PATH),
         ]
+        if _as_flag(settings.get("count_resets")):
+            arguments.append("--count-resets")
+        return arguments
 
     def _start(self, settings: dict) -> None:
         process.terminate_strays()

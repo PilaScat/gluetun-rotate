@@ -4,13 +4,14 @@ import json
 import time
 from pathlib import Path
 
+from gluetun_rotate import provider
 from gluetun_rotate.forbidden import Streaming
 from gluetun_rotate.gluetun import Rotation
 from gluetun_rotate.journal import Journal
 from gluetun_rotate.provider import Account, Probe, SourceCheck
 from gluetun_rotate.tailer import Tailer
 from gluetun_rotate.watcher import Watcher, main
-from gluetun_rotate.web import ApiError
+from gluetun_rotate.web import ApiError, Response
 
 UNO = "e8c1a821-d151-40df-8b7a-5b9cbf19d88f"
 FORBIDDEN_LINE = (
@@ -300,6 +301,47 @@ def test_the_start_says_when_the_dispatcharr_log_is_missing(tmp_path: Path):
     started = journal.read()[0]
     assert started["event"] == "started"
     assert started["stream_log"].startswith("missing: ")
+
+
+def resetting_provider(monkeypatch) -> None:
+    def fake_fetch(url, headers=None, timeout=0.0, **_):
+        if "player_api.php" in url:
+            raise ApiError("GET failed: [Errno 104] Connection reset by peer", reset=True)
+        return Response(status=200, body=b"")
+
+    monkeypatch.setattr(provider, "fetch", fake_fetch)
+
+
+def test_two_reset_rounds_rotate_when_resets_are_counted(monkeypatch, tmp_path: Path):
+    resetting_provider(monkeypatch)
+    gluetun = FakeGluetun()
+    journal = Journal(tmp_path / "journal.jsonl", 200)
+    watcher = Watcher(FakeDispatcharr(), gluetun, journal, count_resets=True)
+    ticks(watcher, 2)
+    assert gluetun.rotations == 1
+    refused = [row for row in journal.read() if row["event"] == "refused"]
+    assert refused[0]["probes"][0].startswith("Miglior IPTV: connection reset (")
+
+
+def test_a_reset_never_rotates_unless_resets_are_counted(monkeypatch, tmp_path: Path):
+    resetting_provider(monkeypatch)
+    gluetun = FakeGluetun()
+    journal = Journal(tmp_path / "journal.jsonl", 200)
+    watcher = Watcher(FakeDispatcharr(), gluetun, journal)
+    ticks(watcher, 5)
+    assert gluetun.rotations == 0
+    assert "refused" not in events(journal)
+
+
+def test_the_start_says_whether_resets_are_counted(tmp_path: Path):
+    for counted in (False, True):
+        journal = Journal(tmp_path / f"journal-{counted}.jsonl", 200)
+        watcher = Watcher(
+            FakeDispatcharr(), FakeGluetun(), journal, prober=Answers(200), count_resets=counted
+        )
+        watcher.stop()
+        watcher.run()
+        assert journal.read()[0]["count_resets"] is counted
 
 
 WATCHING = Streaming(

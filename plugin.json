@@ -29,6 +29,13 @@
       "type": "string",
       "default": "http://127.0.0.1:8000",
       "help_text": "Gluetun's control server as seen from Dispatcharr. Change it only if HTTP_CONTROL_SERVER_ADDRESS was moved."
+    },
+    {
+      "id": "count_resets",
+      "label": "Count a reset connection as a refusal",
+      "type": "boolean",
+      "default": false,
+      "help_text": "For a provider not behind Cloudflare that refuses an exit address by resetting the connection. Off by default: a reset can also be the provider failing for everyone."
     }
   ],
   "actions": [

@@ -188,7 +188,7 @@ def test_applying_without_the_gluetun_key_says_so(loaded_module, isolated_runtim
 
 def test_settings_read_by_the_code_are_declared_in_the_manifest(manifest):
     declared = {field["id"] for field in manifest["fields"]}
-    assert {"api_key", "gluetun_api_key", "gluetun_url"} <= declared
+    assert {"api_key", "gluetun_api_key", "gluetun_url", "count_resets"} <= declared
 
 
 def test_the_keys_reach_the_watcher_through_its_environment_not_its_command_line(
@@ -199,3 +199,21 @@ def test_the_keys_reach_the_watcher_through_its_environment_not_its_command_line
     assert "dispatcharr-secret" not in arguments
     assert "gluetun-secret" not in arguments
     assert arguments[arguments.index("--gluetun-url") + 1] == "http://127.0.0.1:8000"
+
+
+def test_counting_resets_is_a_boolean_that_starts_off(manifest):
+    field = next(field for field in manifest["fields"] if field["id"] == "count_resets")
+    assert field["type"] == "boolean"
+    assert field["default"] is False
+
+
+@pytest.mark.parametrize("value", [None, False, "", "false", "0", "off"])
+def test_the_watcher_counts_no_resets_unless_asked(loaded_module, value):
+    arguments = loaded_module.Plugin()._arguments({"count_resets": value})
+    assert "--count-resets" not in arguments
+
+
+@pytest.mark.parametrize("value", [True, "true", "True", "1", "on"])
+def test_the_watcher_counts_resets_when_asked(loaded_module, value):
+    arguments = loaded_module.Plugin()._arguments({"count_resets": value})
+    assert arguments.count("--count-resets") == 1
