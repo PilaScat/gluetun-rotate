@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -29,6 +30,31 @@ def save(path: Path, values: Mapping[str, Any]) -> dict[str, Any]:
         Path(temporary).unlink(missing_ok=True)
         raise
     return dict(values)
+
+
+def migrate(sources: Iterable[Path], target: Path) -> bool:
+    if _holds_anything(target):
+        return False
+    for source in sources:
+        if source.resolve() == target.resolve() or not _holds_anything(source):
+            continue
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            for entry in list(source.iterdir()):
+                os.rename(entry, target / entry.name)
+        except OSError:
+            return False
+        with contextlib.suppress(OSError):
+            source.rmdir()
+        return True
+    return False
+
+
+def _holds_anything(folder: Path) -> bool:
+    try:
+        return folder.is_dir() and any(folder.iterdir())
+    except OSError:
+        return False
 
 
 def remember(

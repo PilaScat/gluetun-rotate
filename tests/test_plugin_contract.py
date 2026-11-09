@@ -55,6 +55,7 @@ def loaded_module():
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
+    REAL_PATHS.update(runtime=module.RUNTIME_DIR, legacy=module.LEGACY_RUNTIME_DIR)
     yield module
 
     for name in list(sys.modules):
@@ -62,13 +63,23 @@ def loaded_module():
             del sys.modules[name]
 
 
+REAL_PATHS: dict[str, Path] = {}
+
+
+@pytest.fixture(autouse=True)
+def runtime_paths(request, tmp_path, monkeypatch):
+    if "loaded_module" not in request.fixturenames:
+        return None
+    module = request.getfixturevalue("loaded_module")
+    runtime = tmp_path / "_data" / "gluetun-rotate"
+    monkeypatch.setattr(module, "RUNTIME_DIR", runtime)
+    monkeypatch.setattr(module, "LEGACY_RUNTIME_DIR", tmp_path / "gluetun_rotate" / ".runtime")
+    return runtime
+
+
 @pytest.fixture
-def isolated_runtime(loaded_module, tmp_path, monkeypatch):
-    runtime = tmp_path / ".runtime"
-    for name in ("STATE_PATH", "JOURNAL_PATH", "LOG_PATH", "MEDIA_CACHE_DIR"):
-        if hasattr(loaded_module, name):
-            monkeypatch.setattr(loaded_module, name, runtime / getattr(loaded_module, name).name)
-    monkeypatch.setattr(loaded_module, "RUNTIME_DIR", runtime)
+def isolated_runtime(loaded_module, runtime_paths, monkeypatch):
+    runtime = runtime_paths
     monkeypatch.setattr(loaded_module.process, "terminate_strays", lambda *_a, **_k: [])
     if hasattr(loaded_module.process, "find_servers"):
         monkeypatch.setattr(loaded_module.process, "find_servers", lambda *_a, **_k: [])
@@ -166,12 +177,44 @@ def test_manifest_version_matches_the_package_constant(manifest):
 def test_runtime_state_is_not_kept_in_the_plugin_settings():
     source = (ROOT / "plugin.py").read_text(encoding="utf-8")
     assert "PluginConfig" not in source
-    assert "STATE_PATH" in source
+    assert "STATE_FILE" in source
 
 
-def test_the_state_file_lives_beside_the_plugin(loaded_module):
-    assert loaded_module.STATE_PATH.parent == loaded_module.RUNTIME_DIR
-    assert loaded_module.RUNTIME_DIR.parent == ROOT
+def test_the_state_lives_in_a_data_folder_beside_the_plugin_folder(loaded_module):
+    assert REAL_PATHS["runtime"] == ROOT.parent / "_data" / "gluetun-rotate"
+    assert REAL_PATHS["legacy"] == ROOT / ".runtime"
+
+
+def test_the_data_folder_given_by_dispatcharr_holds_the_state(
+    loaded_module, isolated_runtime, tmp_path
+):
+    given = tmp_path / "given"
+    loaded_module.Plugin().stop({"settings": {}, "reason": "reload", "data_dir": str(given)})
+    assert (given / "state.json").is_file()
+    assert not isolated_runtime.exists()
+
+
+def test_a_runtime_folder_left_inside_the_plugin_folder_moves_to_the_data_folder(
+    loaded_module, isolated_runtime
+):
+    legacy = loaded_module.LEGACY_RUNTIME_DIR
+    loaded_module.state_module.save(legacy / "state.json", {"applied": True})
+    for name in ("gluetun-rotate.jsonl", "rotations.json"):
+        (legacy / name).write_text(name, encoding="utf-8")
+    loaded_module.Plugin().stop({"settings": {}, "reason": "reload"})
+    assert loaded_module.state_module.load(isolated_runtime / "state.json") == {"applied": True}
+    for name in ("gluetun-rotate.jsonl", "rotations.json"):
+        assert (isolated_runtime / name).read_text(encoding="utf-8") == name
+    assert not legacy.exists()
+
+
+@pytest.mark.parametrize("reason", ["reload", "disable", "delete"])
+def test_stopping_never_removes_the_data_folder(loaded_module, isolated_runtime, reason):
+    loaded_module.state_module.save(isolated_runtime / "state.json", {"applied": True})
+    (isolated_runtime / "rotations.json").write_text("[1]", encoding="utf-8")
+    loaded_module.Plugin().stop({"settings": {}, "reason": reason})
+    assert (isolated_runtime / "rotations.json").read_text(encoding="utf-8") == "[1]"
+    assert (isolated_runtime / "state.json").is_file()
 
 
 def test_applying_without_the_dispatcharr_key_says_so(loaded_module, isolated_runtime):

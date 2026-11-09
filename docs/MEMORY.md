@@ -51,6 +51,13 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
 - **A held-back rotation is journalled once per reason.** With no time limit the same line
   could repeat every two minutes for hours; the reason is remembered and written again only
   when it changes.
+- **State lives in a data folder outside the plugin folder** (0.5.1, PilaScat/could-not-dispatch#5):
+  an update replaces the plugin folder, `.runtime/` included, and the watcher stayed down with
+  its rotations and journal gone. The folder is `context["data_dir"]` when Dispatcharr gives it
+  (0.34.0), else `/data/plugins/_data/gluetun-rotate`, the hub's path. `state.migrate` moves an
+  old `.runtime/` there on the first `run` or `stop`, only into a missing or empty folder.
+  Nothing removes it on delete: on 0.34.0 Dispatcharr asks the user. The first update to 0.5.1
+  still loses `.runtime/`, so it needs one Apply.
 
 ## Traps
 
@@ -65,15 +72,15 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
 - **The cooldown is 2 minutes** (0.4.0, chosen by the operator on 7 October 2026; 10 minutes
   before): a new address that is blocked too is replaced on the next round.
 - A failed rotation counts toward the 2-minute cooldown and the 3-an-hour limit. Both survive
-  a restart of the watcher (0.2.1): the last hour of rotations is kept in
-  `.runtime/rotations.json` as wall-clock times and mapped onto the watcher's monotonic clock
-  on its first round, not read from the journal, which is trimmed to 50 lines.
+  a restart of the watcher (0.2.1): the last hour of rotations is kept in `rotations.json` in
+  the data folder as wall-clock times and mapped onto the watcher's monotonic clock on its first
+  round, not read from the journal, which is trimmed to 50 lines.
 - Dispatcharr passes `params` to `run()`, never in `context`, and only the events in
   `apps/connect/models.py:SUPPORTED_EVENTS` reach a plugin (20 in 0.32.0).
 - `process.py`, `journal.py`, `state.py` and `tailer.py` are copies of Underfed's: every zip has
   to stand on its own. A fix in one belongs in both.
-- Importing a zip with `overwrite=true` replaces the folder, `.runtime/` included: copy it out
-  and back. Reload after the import, then Apply.
+- Importing a zip with `overwrite=true` replaces the plugin folder; the data folder stays.
+  Reload after the import, then Apply.
 
 ## Release
 

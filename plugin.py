@@ -21,6 +21,7 @@ try:
         MAX_RECENT_EVENTS,
         PLUGIN_DESCRIPTION,
         PLUGIN_NAME,
+        PLUGIN_SLUG,
         PLUGIN_VERSION,
     )
     from .gluetun_rotate.gluetun import Gluetun
@@ -40,6 +41,7 @@ except ImportError:
         MAX_RECENT_EVENTS,
         PLUGIN_DESCRIPTION,
         PLUGIN_NAME,
+        PLUGIN_SLUG,
         PLUGIN_VERSION,
     )
     from gluetun_rotate.gluetun import Gluetun
@@ -50,10 +52,11 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
-RUNTIME_DIR = BASE_DIR / ".runtime"
-STATE_PATH = RUNTIME_DIR / "state.json"
-JOURNAL_PATH = RUNTIME_DIR / "gluetun-rotate.jsonl"
-LOG_PATH = RUNTIME_DIR / "watcher.log"
+RUNTIME_DIR = BASE_DIR.parent / "_data" / PLUGIN_SLUG
+LEGACY_RUNTIME_DIR = BASE_DIR / ".runtime"
+STATE_FILE = "state.json"
+JOURNAL_FILE = "gluetun-rotate.jsonl"
+LOG_FILE = "watcher.log"
 
 DETACHING_REASONS = frozenset({"disable", "delete"})
 FAILED_EVENTS = frozenset({"failed", "api_error", "error"})
@@ -102,6 +105,26 @@ class Plugin:
     fields = _MANIFEST.get("fields", [])
     actions = _MANIFEST.get("actions", [])
 
+    def __init__(self) -> None:
+        self._runtime = RUNTIME_DIR
+
+    @property
+    def _state_path(self) -> Path:
+        return self._runtime / STATE_FILE
+
+    @property
+    def _journal_path(self) -> Path:
+        return self._runtime / JOURNAL_FILE
+
+    @property
+    def _log_path(self) -> Path:
+        return self._runtime / LOG_FILE
+
+    def _locate(self, context: dict) -> None:
+        given = str(context.get("data_dir") or "").strip()
+        self._runtime = Path(given) if given else RUNTIME_DIR
+        state_module.migrate([RUNTIME_DIR, LEGACY_RUNTIME_DIR], self._runtime)
+
     def run(self, action: str, params: dict, context: dict) -> dict:
         handlers = {
             "apply": self._apply,
@@ -113,6 +136,7 @@ class Plugin:
         handler = handlers.get((action or "").strip().lower())
         if handler is None:
             return {"status": "error", "message": f"Unknown action '{action}'."}
+        self._locate(dict(context or {}))
         try:
             return handler(dict(context or {}))
         except Exception as exc:
@@ -121,6 +145,7 @@ class Plugin:
 
     def stop(self, context: dict | None = None) -> dict:
         context = dict(context or {})
+        self._locate(context)
         stopped = self._stop_watcher()
         if str(context.get("reason") or "") in DETACHING_REASONS:
             self._remember({}, clear=["pid", "token", "applied"])
@@ -148,7 +173,7 @@ class Plugin:
         settings = dict(context.get("settings") or {})
         state = self._state()
         running = process.is_running(state.get("pid"), state.get("token"))
-        records = Journal(JOURNAL_PATH, MAX_RECENT_EVENTS).read()
+        records = Journal(self._journal_path, MAX_RECENT_EVENTS).read()
         rotations = [row for row in records if row.get("event") == "rotated"]
         failed = [row for row in records if row.get("event") in FAILED_EVENTS]
         forbidden = [row for row in records if row.get("event") == "forbidden"]
@@ -260,7 +285,7 @@ class Plugin:
             "--gluetun-url",
             self._gluetun_url(settings),
             "--journal",
-            str(JOURNAL_PATH),
+            str(self._journal_path),
         ]
         if _as_flag(settings.get("count_resets")):
             arguments.append("--count-resets")
@@ -273,7 +298,7 @@ class Plugin:
             BASE_DIR,
             self._arguments(settings),
             token,
-            LOG_PATH,
+            self._log_path,
             extra_env={
                 API_KEY_ENV: _as_text(settings.get("api_key"), ""),
                 GLUETUN_KEY_ENV: _as_text(settings.get("gluetun_api_key"), ""),
@@ -283,7 +308,7 @@ class Plugin:
         if not self._settled(pid, token):
             process.terminate(pid)
             self._remember({}, clear=["pid", "token"])
-            raise RuntimeError(f"The watcher exited on startup. See {LOG_PATH}.")
+            raise RuntimeError(f"The watcher exited on startup. See {self._log_path}.")
 
     def _settled(self, pid: int, token: str, seconds: float = 3.0) -> bool:
         deadline = time.monotonic() + seconds
@@ -309,7 +334,7 @@ class Plugin:
         return True
 
     def _state(self) -> dict:
-        return state_module.load(STATE_PATH)
+        return state_module.load(self._state_path)
 
     def _remember(self, updates: dict, clear: list[str] | None = None) -> dict:
-        return state_module.remember(STATE_PATH, updates, clear or [])
+        return state_module.remember(self._state_path, updates, clear or [])
