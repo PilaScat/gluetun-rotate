@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.2 — 2026-11-09
+
+- **A watcher left running by an update is replaced.** An install from the Plugin Hub does not
+  stop the plugin's watcher, so after an update the old one kept running the old code until
+  Apply was pressed. The watcher now records the version that started it, and the first
+  channel that starts after an update replaces one started by an older version. A watcher
+  stopped in the middle of a rotation can leave the tunnel down until the next round.
+- **This version includes 0.5.1, which did not reach the Plugin Hub**
+  (PilaScat/could-not-dispatch#5): the watcher's state, its recent rotations and its journal
+  live outside the plugin folder, in `/data/plugins/_data/gluetun-rotate`, so later updates keep
+  them.
+- **Coming from 0.5.0, press Apply once.** That update still replaces the old folder: the
+  watcher does not start again by itself, and the hourly rotation limit and the journal start
+  from zero.
+
 ## 0.5.1 — 2026-11-09
 
 - **The watcher's state survives updates** (PilaScat/could-not-dispatch#5). An update from the
