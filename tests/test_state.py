@@ -50,3 +50,27 @@ def test_migrate_takes_the_first_source_that_holds_something(tmp_path):
     assert state.migrate([target, first, second], target) is True
     assert state.load(target / "state.json") == {"from": "first"}
     assert second.exists()
+
+
+def test_a_process_without_a_recorded_version_is_older():
+    assert state.is_older(None, "0.7.5") is True
+
+
+def test_versions_compare_by_their_numbers():
+    assert state.is_older("0.7.4", "0.7.5") is True
+    assert state.is_older("0.9.2", "0.10.0") is True
+    assert state.is_older("0.10.0", "0.9.2") is False
+    assert state.is_older("0.7.5", "0.7.5") is False
+    assert state.is_older("v0.7.5", "0.7.5") is False
+
+
+def test_an_unreadable_version_of_the_running_code_never_replaces():
+    assert state.is_older("0.7.4", "dev") is False
+    assert state.is_older("rubbish", "0.7.5") is True
+
+
+def test_the_version_counts_only_for_the_process_that_recorded_it():
+    recorded = {"token": "t", "version": "0.7.5", "version_token": "t"}
+    assert state.started_version(recorded) == "0.7.5"
+    assert state.started_version({**recorded, "token": "u"}) is None
+    assert state.started_version({"version": "0.7.5"}) is None

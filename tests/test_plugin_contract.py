@@ -260,3 +260,75 @@ def test_the_watcher_counts_no_resets_unless_asked(loaded_module, value):
 def test_the_watcher_counts_resets_when_asked(loaded_module, value):
     arguments = loaded_module.Plugin()._arguments({"count_resets": value})
     assert arguments.count("--count-resets") == 1
+
+
+VALID_SETTINGS = {"api_key": "k", "gluetun_api_key": "g"}
+
+
+@pytest.fixture
+def replacing(loaded_module, isolated_runtime, monkeypatch):
+    started: list[bool] = []
+    monkeypatch.setattr(loaded_module, "_running_inside_uwsgi", lambda: True)
+    monkeypatch.setattr(loaded_module.Plugin, "_heartbeat_due", lambda self: True)
+    monkeypatch.setattr(loaded_module.process, "is_running", lambda *_a: True)
+    monkeypatch.setattr(loaded_module.Plugin, "_start", lambda self, *_a: started.append(True))
+
+    def remember(values: dict) -> None:
+        loaded_module.state_module.save(isolated_runtime / "state.json", values)
+
+    return remember, started
+
+
+@pytest.mark.parametrize(
+    ("recorded", "replaced"),
+    [
+        ({}, True),
+        ({"version": "0.1.0", "version_token": "t"}, True),
+        ({"version": "current", "version_token": "another"}, True),
+        ({"version": "current", "version_token": "t"}, False),
+        ({"version": "99.0.0", "version_token": "t"}, False),
+    ],
+)
+def test_a_channel_start_replaces_a_watcher_started_by_an_older_version(
+    loaded_module, replacing, recorded, replaced
+):
+    remember, started = replacing
+    if recorded.get("version") == "current":
+        recorded = {**recorded, "version": loaded_module.PLUGIN_VERSION}
+    remember({"applied": True, "pid": 7, "token": "t", **recorded})
+    result = loaded_module.Plugin().run("restart", {}, {"settings": VALID_SETTINGS})
+    assert result["message"] == ("Watcher restarted." if replaced else "Watcher is running.")
+    assert started == ([True] if replaced else [])
+
+
+def test_an_older_watcher_stays_when_a_key_is_missing(loaded_module, replacing):
+    remember, started = replacing
+    remember({"applied": True, "pid": 7, "token": "t"})
+    result = loaded_module.Plugin().run("restart", {}, {"settings": {"api_key": "k"}})
+    assert result["status"] == "error"
+    assert started == []
+
+
+def test_a_watcher_another_worker_already_replaced_is_left_alone(
+    loaded_module, replacing, monkeypatch
+):
+    _remember, started = replacing
+    older = {"applied": True, "pid": 7, "token": "t"}
+    current = {**older, "pid": 8, "token": "u", "version_token": "u"}
+    current["version"] = loaded_module.PLUGIN_VERSION
+    states = iter([older, current, current])
+    monkeypatch.setattr(loaded_module.Plugin, "_state", lambda self: next(states))
+    result = loaded_module.Plugin().run("restart", {}, {"settings": VALID_SETTINGS})
+    assert result["message"] == "Watcher is running."
+    assert started == []
+
+
+def test_starting_a_watcher_records_the_version_that_started_it(
+    loaded_module, isolated_runtime, monkeypatch
+):
+    monkeypatch.setattr(loaded_module.process, "spawn", lambda *_a, **_k: 4242)
+    monkeypatch.setattr(loaded_module.Plugin, "_settled", lambda self, *_a, **_k: True)
+    loaded_module.Plugin()._start(VALID_SETTINGS)
+    state = loaded_module.state_module.load(isolated_runtime / "state.json")
+    assert state["version"] == loaded_module.PLUGIN_VERSION
+    assert state["version_token"] == state["token"]

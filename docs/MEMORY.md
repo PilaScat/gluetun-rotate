@@ -58,6 +58,15 @@ Decisions, traps and the release routine. What the plugin does for a user is in 
   old `.runtime/` there on the first `run` or `stop`, only into a missing or empty folder.
   Nothing removes it on delete: on 0.34.0 Dispatcharr asks the user. The first update to 0.5.1
   still loses `.runtime/`, so it needs one Apply.
+- **A watcher started by an older version is replaced** (0.5.2). An install from the hub does
+  not stop the watcher, and with the state kept in the data folder `restart` found it running
+  and kept the old code. The start records `version` with `version_token`, the token of that
+  process, so a pid started by code that does not know the field never passes for current.
+  `restart` replaces a watcher whose version is missing or older, never a newer one, or a worker
+  still on the old code would replace it back; it checks the keys first and reads the state
+  again before starting, and logs the replacement at INFO. A watcher stopped mid-rotation can
+  leave the tunnel down until the next round. `state.is_older` and `state.started_version` are
+  the same as in Could Not Dispatch and Underfed.
 
 ## Traps
 

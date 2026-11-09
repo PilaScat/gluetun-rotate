@@ -3,10 +3,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import tempfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+
+VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -48,6 +51,28 @@ def migrate(sources: Iterable[Path], target: Path) -> bool:
             source.rmdir()
         return True
     return False
+
+
+def is_older(stored: object, current: str) -> bool:
+    mine = _version(current)
+    if mine is None:
+        return False
+    theirs = _version(stored)
+    return theirs is None or theirs < mine
+
+
+def started_version(values: Mapping[str, Any]) -> object:
+    token = values.get("token")
+    if token and values.get("version_token") == token:
+        return values.get("version")
+    return None
+
+
+def _version(value: object) -> tuple[int, ...] | None:
+    if value is None:
+        return None
+    match = VERSION_PATTERN.match(str(value).strip())
+    return tuple(int(part) for part in match.groups()) if match else None
 
 
 def _holds_anything(folder: Path) -> bool:
