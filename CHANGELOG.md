@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.1 — 2026-11-09
+
+- **The watcher's state survives updates** (PilaScat/could-not-dispatch#5). An update from the
+  Plugin Hub replaces the plugin folder, which held the record that the watcher was applied,
+  its recent rotations and its journal: the watcher no longer started again with the channels
+  until Apply was pressed. They now live outside the plugin folder, in
+  `/data/plugins/_data/gluetun-rotate`, or in the folder Dispatcharr gives plugins from 0.34.0,
+  and later updates keep them. An older `.runtime` folder is moved there by itself.
+- **After this update, press Apply once.** This update still replaces the old folder: the
+  watcher does not start again by itself, and the hourly rotation limit and the journal start
+  from zero.
+
 ## 0.5.0 — 2026-11-06
 
 - **A reset connection can count as a refusal, behind a new setting that is off by default.**
