@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.0 — 2026-11-17
+
+- **Needs Dispatcharr 0.34.0.** That version runs plugin actions in a background worker, where
+  the restart that ran when a channel started never started the watcher: after a reload or a
+  restart of Dispatcharr it stayed down until Apply was pressed. A background service that
+  Dispatcharr runs on one of its processes now keeps the watcher running: it starts with
+  Dispatcharr and comes back by itself within about half a minute of a restart, a reload or an
+  update. The Restart watcher action is gone. On older versions of Dispatcharr the Plugin Hub
+  keeps offering 0.5.2.
+- **A 403 in the log no longer holds up the probe.** Dispatcharr 0.34.0 masks provider
+  addresses and credentials in its log by default, and a 403 there made the round fail before
+  it asked the provider, delaying a rotation by two minutes. The source behind a masked 403 is
+  rebuilt from the Xtream Codes account to check it for the block page; with more than one
+  account it is skipped, and the journal says so.
+- **Dispatcharr asks you to approve what the plugin does** when you update or enable it: a
+  background service, a process of its own and HTTP calls. Declining disables the plugin.
+- The watcher no longer inherits Dispatcharr's open files and sockets, and one that has ended
+  is no longer taken for a running one.
+
 ## 0.5.2 — 2026-11-09
 
 - **A watcher left running by an update is replaced.** An install from the Plugin Hub does not

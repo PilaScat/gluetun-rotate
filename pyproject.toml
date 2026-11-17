@@ -1,6 +1,6 @@
 [project]
 name = "gluetun-rotate"
-version = "0.5.2"
+version = "0.6.0"
 description = "Moves Gluetun to another VPN server when the IPTV provider refuses the current exit address."
 readme = "README.md"
 license = { text = "MIT" }
