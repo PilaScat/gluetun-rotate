@@ -61,16 +61,6 @@
       "button_variant": "default"
     },
     {
-      "id": "restart",
-      "label": "Restart watcher",
-      "description": "Starts the watcher again if it is down.",
-      "button_label": "Restart",
-      "button_variant": "default",
-      "events": [
-        "channel_start"
-      ]
-    },
-    {
       "id": "remove",
       "label": "Stop watcher",
       "description": "Stops the watcher and leaves the tunnel where it is.",

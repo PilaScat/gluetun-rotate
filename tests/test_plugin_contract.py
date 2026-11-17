@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -160,6 +161,10 @@ def test_manifest_binds_only_events_that_reach_plugin_hooks(manifest):
             assert event in PLUGIN_HOOK_EVENTS, event
 
 
+def test_no_action_waits_for_a_channel_to_start(manifest):
+    assert all("events" not in action for action in manifest["actions"])
+
+
 def test_manifest_carries_what_the_registry_requires(manifest):
     for key in ("name", "version", "description", "author", "license"):
         assert manifest.get(key), key
@@ -268,8 +273,6 @@ VALID_SETTINGS = {"api_key": "k", "gluetun_api_key": "g"}
 @pytest.fixture
 def replacing(loaded_module, isolated_runtime, monkeypatch):
     started: list[bool] = []
-    monkeypatch.setattr(loaded_module, "_running_inside_uwsgi", lambda: True)
-    monkeypatch.setattr(loaded_module.Plugin, "_heartbeat_due", lambda self: True)
     monkeypatch.setattr(loaded_module.process, "is_running", lambda *_a: True)
     monkeypatch.setattr(loaded_module.Plugin, "_start", lambda self, *_a: started.append(True))
 
@@ -277,6 +280,13 @@ def replacing(loaded_module, isolated_runtime, monkeypatch):
         loaded_module.state_module.save(isolated_runtime / "state.json", values)
 
     return remember, started
+
+
+def _supervise(plugin, settings: dict, stopped: bool = False) -> str:
+    event = threading.Event()
+    if stopped:
+        event.set()
+    return plugin._keep_running(event, lambda: settings)
 
 
 @pytest.mark.parametrize(
@@ -289,24 +299,124 @@ def replacing(loaded_module, isolated_runtime, monkeypatch):
         ({"version": "99.0.0", "version_token": "t"}, False),
     ],
 )
-def test_a_channel_start_replaces_a_watcher_started_by_an_older_version(
+def test_the_supervisor_replaces_a_watcher_started_by_an_older_version(
     loaded_module, replacing, recorded, replaced
 ):
     remember, started = replacing
     if recorded.get("version") == "current":
         recorded = {**recorded, "version": loaded_module.PLUGIN_VERSION}
     remember({"applied": True, "pid": 7, "token": "t", **recorded})
-    result = loaded_module.Plugin().run("restart", {}, {"settings": VALID_SETTINGS})
-    assert result["message"] == ("Watcher restarted." if replaced else "Watcher is running.")
+    _supervise(loaded_module.Plugin(), VALID_SETTINGS)
     assert started == ([True] if replaced else [])
 
 
 def test_an_older_watcher_stays_when_a_key_is_missing(loaded_module, replacing):
     remember, started = replacing
     remember({"applied": True, "pid": 7, "token": "t"})
-    result = loaded_module.Plugin().run("restart", {}, {"settings": {"api_key": "k"}})
-    assert result["status"] == "error"
+    assert "Gluetun" in _supervise(loaded_module.Plugin(), {"api_key": "k"})
     assert started == []
+
+
+@pytest.fixture
+def starting(loaded_module, isolated_runtime, monkeypatch):
+    started: list[dict] = []
+    monkeypatch.setattr(loaded_module.process, "is_running", lambda *_a: False)
+    monkeypatch.setattr(
+        loaded_module.Plugin, "_start", lambda self, settings: started.append(settings)
+    )
+
+    def applied() -> None:
+        loaded_module.state_module.save(isolated_runtime / "state.json", {"applied": True})
+
+    return applied, started
+
+
+def test_the_supervisor_starts_the_watcher_with_the_current_settings(loaded_module, starting):
+    applied, started = starting
+    applied()
+    assert _supervise(loaded_module.Plugin(), VALID_SETTINGS) == ""
+    assert started == [VALID_SETTINGS]
+
+
+def test_the_supervisor_leaves_a_watcher_that_was_never_applied(loaded_module, starting):
+    _applied, started = starting
+    _supervise(loaded_module.Plugin(), VALID_SETTINGS)
+    assert started == []
+
+
+def test_the_supervisor_does_not_bring_back_a_removed_watcher(loaded_module, starting):
+    applied, started = starting
+    applied()
+    plugin = loaded_module.Plugin()
+    plugin.run("remove", {}, {"settings": {}})
+    _supervise(plugin, VALID_SETTINGS)
+    assert started == []
+
+
+def test_the_supervisor_starts_nothing_once_it_is_told_to_stop(loaded_module, starting):
+    applied, started = starting
+    applied()
+    _supervise(loaded_module.Plugin(), VALID_SETTINGS, stopped=True)
+    assert started == []
+
+
+def test_the_supervisor_of_an_older_version_leaves_the_start_to_the_newer_one(
+    loaded_module, starting, monkeypatch
+):
+    applied, started = starting
+    applied()
+    monkeypatch.setattr(loaded_module, "_read_manifest", lambda: {"version": "99.0.0"})
+    _supervise(loaded_module.Plugin(), VALID_SETTINGS)
+    assert started == []
+
+
+class _OneRound:
+    def __init__(self) -> None:
+        self.waits: list[float] = []
+
+    def is_set(self) -> bool:
+        return bool(self.waits)
+
+    def wait(self, seconds: float) -> bool:
+        self.waits.append(seconds)
+        return True
+
+
+def test_a_failing_start_is_written_to_the_journal_and_retried_later(
+    loaded_module, isolated_runtime, starting, monkeypatch
+):
+    applied, _started = starting
+    applied()
+
+    def fail(self, settings):
+        raise RuntimeError("The watcher exited on startup.")
+
+    monkeypatch.setattr(loaded_module.Plugin, "_start", fail)
+    event = _OneRound()
+    loaded_module.Plugin()._supervise(event, lambda: VALID_SETTINGS)
+    records = loaded_module.Journal(isolated_runtime / "gluetun-rotate.jsonl", 50).read()
+    assert records[-1]["event"] == "error"
+    assert "exited on startup" in records[-1]["detail"]
+    assert event.waits == [loaded_module.SUPERVISE_RETRY_SECONDS]
+
+
+def test_leadership_starts_one_supervisor_that_reads_the_current_settings(
+    loaded_module, starting
+):
+    applied, started = starting
+    applied()
+    services: list[tuple] = []
+    context = {
+        "settings": {},
+        "get_settings": lambda: VALID_SETTINGS,
+        "start_service": lambda target, name=None: services.append((target, name)),
+    }
+    loaded_module.Plugin().on_leader_acquired(context)
+    assert [name for _target, name in services] == ["watcher"]
+    event = _OneRound()
+    services[0][0](event)
+    assert started == [VALID_SETTINGS]
+    assert event.waits == [loaded_module.SUPERVISE_INTERVAL_SECONDS]
 
 
 def test_a_watcher_another_worker_already_replaced_is_left_alone(
@@ -318,8 +428,7 @@ def test_a_watcher_another_worker_already_replaced_is_left_alone(
     current["version"] = loaded_module.PLUGIN_VERSION
     states = iter([older, current, current])
     monkeypatch.setattr(loaded_module.Plugin, "_state", lambda self: next(states))
-    result = loaded_module.Plugin().run("restart", {}, {"settings": VALID_SETTINGS})
-    assert result["message"] == "Watcher is running."
+    _supervise(loaded_module.Plugin(), VALID_SETTINGS)
     assert started == []
 
 

@@ -67,28 +67,45 @@ def spawn(
     environment[RUN_TOKEN_ENV] = run_token
     environment.update(dict(extra_env or {}))
     environment.setdefault("PYTHONUNBUFFERED", "1")
+    environment["PYTHONSAFEPATH"] = "1"
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     _trim_log(log_path)
-    handle = log_path.open("ab")
+    if sys.platform == "win32":
+        return _popen(command, environment, base_dir, log_path)
+    return os.posix_spawn(
+        command[0], command, environment, file_actions=spawn_actions(log_path), setsid=True
+    )
 
-    options: dict[str, object] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": handle,
-        "stderr": subprocess.STDOUT,
-        "env": environment,
-        "cwd": str(base_dir),
-        "close_fds": True,
-    }
-    if os.name == "nt":
-        options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    else:
-        options["start_new_session"] = True
 
-    try:
-        process = subprocess.Popen(command, **options)  # type: ignore[call-overload]
-    finally:
-        handle.close()
+def spawn_actions(log_path: Path) -> list[tuple]:
+    if sys.platform == "win32":
+        return []
+    actions: list[tuple] = [
+        (os.POSIX_SPAWN_OPEN, 0, os.devnull, os.O_RDONLY, 0),
+        (os.POSIX_SPAWN_OPEN, 1, str(log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o666),
+        (os.POSIX_SPAWN_DUP2, 1, 2),
+    ]
+    close_from = getattr(os, "POSIX_SPAWN_CLOSEFROM", None)
+    if close_from is not None:
+        actions.append((close_from, 3))
+    return actions
+
+
+def _popen(
+    command: Sequence[str], environment: Mapping[str, str], base_dir: Path, log_path: Path
+) -> int:
+    with log_path.open("ab") as handle:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            env=dict(environment),
+            cwd=str(base_dir),
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
     return process.pid
 
 
@@ -181,6 +198,8 @@ def is_running(pid: object, expected_token: str | None = None) -> bool:
         pass
     except OSError:
         return False
+    if is_zombie(target):
+        return False
     try:
         os.kill(target, 0)
     except ProcessLookupError:
@@ -190,6 +209,16 @@ def is_running(pid: object, expected_token: str | None = None) -> bool:
     except OSError:
         return False
     return True
+
+
+def is_zombie(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        return False
+    fields = raw.rpartition(b")")[2].split()
+    return bool(fields) and fields[0] == b"Z"
 
 
 def reap(pid: int) -> None:

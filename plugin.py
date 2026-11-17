@@ -6,6 +6,8 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -17,12 +19,13 @@ try:
         DEFAULT_API_URL,
         DEFAULT_GLUETUN_URL,
         GLUETUN_KEY_ENV,
-        HEARTBEAT_INTERVAL_SECONDS,
         MAX_RECENT_EVENTS,
         PLUGIN_DESCRIPTION,
         PLUGIN_NAME,
         PLUGIN_SLUG,
         PLUGIN_VERSION,
+        SUPERVISE_INTERVAL_SECONDS,
+        SUPERVISE_RETRY_SECONDS,
     )
     from .gluetun_rotate.gluetun import Gluetun
     from .gluetun_rotate.journal import Journal
@@ -37,12 +40,13 @@ except ImportError:
         DEFAULT_API_URL,
         DEFAULT_GLUETUN_URL,
         GLUETUN_KEY_ENV,
-        HEARTBEAT_INTERVAL_SECONDS,
         MAX_RECENT_EVENTS,
         PLUGIN_DESCRIPTION,
         PLUGIN_NAME,
         PLUGIN_SLUG,
         PLUGIN_VERSION,
+        SUPERVISE_INTERVAL_SECONDS,
+        SUPERVISE_RETRY_SECONDS,
     )
     from gluetun_rotate.gluetun import Gluetun
     from gluetun_rotate.journal import Journal
@@ -61,10 +65,6 @@ LOG_FILE = "watcher.log"
 DETACHING_REASONS = frozenset({"disable", "delete"})
 FAILED_EVENTS = frozenset({"failed", "api_error", "error"})
 
-_heartbeat_lock = threading.Lock()
-_heartbeat_checked_at = 0.0
-
-
 def _read_manifest() -> dict[str, Any]:
     try:
         with (BASE_DIR / "plugin.json").open(encoding="utf-8") as handle:
@@ -77,12 +77,12 @@ def _read_manifest() -> dict[str, Any]:
 _MANIFEST = _read_manifest()
 
 
-def _running_inside_uwsgi() -> bool:
+def _close_database_connection() -> None:
     try:
-        import uwsgi  # noqa: F401
+        from django.db import connection
     except ImportError:
-        return False
-    return True
+        return
+    connection.close()
 
 
 def _as_text(value: object, fallback: str) -> str:
@@ -130,7 +130,6 @@ class Plugin:
             "apply": self._apply,
             "status": self._status,
             "test": self._test,
-            "restart": self._restart,
             "remove": self._remove,
         }
         handler = handlers.get((action or "").strip().lower())
@@ -230,27 +229,57 @@ class Plugin:
             "refused": any(result.refused for result in results),
         }
 
-    def _restart(self, context: dict) -> dict:
-        settings = dict(context.get("settings") or {})
+    def on_leader_acquired(self, context: dict) -> None:
+        context = dict(context or {})
+        self._locate(context)
+        snapshot = dict(context.get("settings") or {})
+        reader = context.get("get_settings")
+
+        def read_settings() -> dict:
+            return dict(reader() or {}) if callable(reader) else snapshot
+
+        supervise = partial(self._supervise, read_settings=read_settings)
+        context["start_service"](supervise, name="watcher")
+
+    def _supervise(self, stop_event: threading.Event, read_settings: Callable[[], dict]) -> None:
+        reported = ""
+        while not stop_event.is_set():
+            problem = self._supervise_once(stop_event, read_settings)
+            if problem and problem != reported:
+                Journal(self._journal_path, MAX_RECENT_EVENTS).write("error", detail=problem)
+            reported = problem
+            stop_event.wait(SUPERVISE_RETRY_SECONDS if problem else SUPERVISE_INTERVAL_SECONDS)
+
+    def _supervise_once(
+        self, stop_event: threading.Event, read_settings: Callable[[], dict]
+    ) -> str:
+        try:
+            return self._keep_running(stop_event, read_settings)
+        except Exception as exc:
+            logger.exception("Gluetun Rotate could not keep the watcher running")
+            return f"{type(exc).__name__}: {exc}"
+        finally:
+            _close_database_connection()
+
+    def _keep_running(self, stop_event: threading.Event, read_settings: Callable[[], dict]) -> str:
+        if self._superseded():
+            return ""
         state = self._state()
-        if not state.get("applied"):
-            return {"status": "ok", "message": "Nothing to do: not applied."}
-        if not _running_inside_uwsgi():
-            return {
-                "status": "ok",
-                "message": "Skipped: the watcher only starts in the Dispatcharr web process.",
-            }
-        if not self._heartbeat_due():
-            return {"status": "ok", "message": "Checked recently."}
-        if self._current(state):
-            return {"status": "ok", "message": "Watcher is running."}
+        if not state.get("applied") or self._current(state):
+            return ""
+        settings = read_settings()
         missing = self._missing_keys(settings)
         if missing:
-            return {"status": "error", "message": missing}
-        if self._replaced_meanwhile():
-            return {"status": "ok", "message": "Watcher is running."}
+            return missing
+        if stop_event.is_set() or self._replaced_meanwhile():
+            return ""
+        if not self._state().get("applied"):
+            return ""
         self._start(settings)
-        return {"status": "ok", "message": "Watcher restarted."}
+        return ""
+
+    def _superseded(self) -> bool:
+        return state_module.is_older(PLUGIN_VERSION, _read_manifest().get("version"))
 
     def _remove(self, context: dict) -> dict:
         stopped = self._stop_watcher()
@@ -350,15 +379,6 @@ class Plugin:
                 state_module.started_version(latest) or "an older version",
             )
         return False
-
-    def _heartbeat_due(self) -> bool:
-        global _heartbeat_checked_at
-        now = time.monotonic()
-        with _heartbeat_lock:
-            if now - _heartbeat_checked_at < HEARTBEAT_INTERVAL_SECONDS:
-                return False
-            _heartbeat_checked_at = now
-        return True
 
     def _state(self) -> dict:
         return state_module.load(self._state_path)
