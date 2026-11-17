@@ -7,7 +7,14 @@ import urllib.parse
 import pytest
 
 from gluetun_rotate import provider, web
-from gluetun_rotate.provider import Account, Dispatcharr, Probe, check_source, probe
+from gluetun_rotate.provider import (
+    Account,
+    Dispatcharr,
+    Probe,
+    check_source,
+    probe,
+    unmasked,
+)
 from gluetun_rotate.web import ApiError, Response, fetch
 
 ACCOUNT = Account(
@@ -235,3 +242,39 @@ def test_an_unreachable_source_is_reported_without_raising():
     assert check.status is None
     assert check.blocked is False
     assert "Name or service not known" in check.detail
+
+
+MASKED = "http://[provider_host]/live/[username]/[password]/542037.ts"
+SECOND = Account(
+    name="Other",
+    server_url="http://other.example:8080",
+    username="u2",
+    password="p2",
+    user_agent="VLC",
+)
+
+
+def test_a_masked_source_is_rebuilt_from_the_only_account():
+    account = Account(
+        name="Miglior IPTV",
+        server_url="http://provider.example:8080/",
+        username="user",
+        password="s3cret/pass",
+        user_agent="TiviMate",
+    )
+    assert unmasked(MASKED, [account]) == (
+        "http://provider.example:8080/live/user/s3cret%2Fpass/542037.ts"
+    )
+
+
+def test_a_masked_source_with_two_accounts_cannot_be_rebuilt():
+    assert unmasked(MASKED, [ACCOUNT, SECOND]) is None
+
+
+def test_a_plain_source_is_left_as_it_is():
+    plain = "http://provider.example/live/user/pass/542037.ts"
+    assert unmasked(plain, [ACCOUNT, SECOND]) == plain
+
+
+def test_a_masked_source_with_an_unknown_placeholder_is_not_guessed():
+    assert unmasked("http://[provider_host]/live/[token]/542037.ts", [ACCOUNT]) is None

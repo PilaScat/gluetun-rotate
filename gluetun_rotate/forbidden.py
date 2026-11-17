@@ -30,8 +30,31 @@ class Streaming:
     clients: int = 0
 
 
+MASKED_HOST = "[provider_host]"
+
+
+def is_masked(url: str) -> bool:
+    return MASKED_HOST in url
+
+
+def path_of(url: str) -> str:
+    try:
+        return urllib.parse.urlparse(url).path
+    except ValueError:
+        after_scheme = url.split("://", 1)[-1]
+        slash = after_scheme.find("/")
+        return re.split(r"[?#]", after_scheme[slash:], maxsplit=1)[0] if slash >= 0 else ""
+
+
+def host_of(url: str) -> str:
+    try:
+        return urllib.parse.urlparse(url).hostname or ""
+    except ValueError:
+        return ""
+
+
 def feed_of(url: str) -> str:
-    return urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]
+    return path_of(url).rsplit("/", 1)[-1]
 
 
 def forbidden_source(line: str) -> Source | None:

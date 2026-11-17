@@ -5,7 +5,9 @@ from gluetun_rotate.forbidden import (
     Streaming,
     count_forbidden,
     describe,
+    feed_of,
     forbidden_source,
+    host_of,
     refused_urls,
 )
 
@@ -79,3 +81,27 @@ def test_the_proxy_403_carries_its_own_url():
 
 def test_other_errors_name_no_url():
     assert refused_urls([ATTEMPT, RESERVOARR_520]) == []
+
+
+MASKED = "http://[provider_host]/live/[username]/[password]/542037.ts"
+
+
+def test_a_masked_url_still_gives_its_feed_and_no_host():
+    assert feed_of(MASKED) == "542037.ts"
+    assert host_of(MASKED) == ""
+    assert feed_of(MASKED + "?token=[token]") == "542037.ts"
+
+
+def test_a_masked_403_from_the_proxy_counts_for_its_feed():
+    line = f"2026-11-17 21:00:01,000 +0100 ERROR live_proxy.http_streamer HTTP 403 from {MASKED}"
+    assert count_forbidden([line]) == {Source(feed="542037.ts"): 1}
+
+
+def test_a_masked_attempt_before_a_403_is_returned_as_it_is():
+    lines = [
+        f"2026-11-17 21:00:00,000 +0100 INFO live_proxy.manager Connection attempt 1/3 for URL: "
+        f"{MASKED} for channel {UNO}",
+        f"2026-11-17 21:00:01,000 +0100 ERROR live_proxy.manager Stream process error for channel "
+        f"{UNO}: [delaybuf] upstream error HTTPError: HTTP Error 403: Forbidden; retry in 2s",
+    ]
+    assert refused_urls(lines) == [MASKED]

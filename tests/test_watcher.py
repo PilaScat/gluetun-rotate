@@ -489,3 +489,63 @@ def test_a_blocked_source_waits_while_someone_watches_the_provider(tmp_path: Pat
     ticks(watcher, 3, start=120.0)
     assert gluetun.rotations == 0
     assert journal.read()[-1]["reason"] == "someone is watching Rai 1"
+
+
+MASKED_SOURCE = "http://[provider_host]/live/[username]/[password]/690608.ts"
+MASKED_ATTEMPT = (
+    f"2026-11-17 21:00:00,000 +0100 INFO live_proxy.manager Connection attempt 1/3 for URL: "
+    f"{MASKED_SOURCE} for channel {UNO}"
+)
+
+
+def with_masked_refusal(
+    tmp_path: Path, checks: Checks, dispatcharr: FakeDispatcharr | None = None
+) -> tuple[Watcher, FakeGluetun, Journal]:
+    log = tmp_path / "dispatcharr.log"
+    log.write_text("before the watcher\n", encoding="utf-8")
+    journal = Journal(tmp_path / "journal.jsonl", 200)
+    gluetun = FakeGluetun()
+    watcher = Watcher(
+        dispatcharr or FakeDispatcharr(),
+        gluetun,
+        journal,
+        prober=Answers(200, 520, 520),
+        stream_log=Tailer(log),
+        checker=checks,
+    )
+    watcher.tick(0.0)
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(MASKED_ATTEMPT + "\n" + FORBIDDEN_LINE + "\n")
+    return watcher, gluetun, journal
+
+
+def test_a_masked_403_still_lets_the_probe_run_in_the_same_round(tmp_path: Path):
+    watcher, _gluetun, journal = with_masked_refusal(tmp_path, Checks(False))
+    watcher.tick(120.0)
+    assert "refused" in events(journal)
+    assert "error" not in events(journal)
+
+
+def test_a_masked_source_is_checked_with_the_url_of_the_only_account(tmp_path: Path):
+    checks = Checks(True, False)
+    watcher, gluetun, journal = with_masked_refusal(tmp_path, checks)
+    watcher.tick(120.0)
+    assert checks.asked == [(SOURCE, ACCOUNT.user_agent)]
+    assert "s3cret-pass" not in (tmp_path / "journal.jsonl").read_text(encoding="utf-8")
+
+
+def test_a_masked_source_with_two_accounts_is_skipped_and_said(tmp_path: Path):
+    other = Account(
+        name="Other",
+        server_url="http://other.example/",
+        username="u2",
+        password="p2",
+        user_agent="VLC",
+    )
+    checks = Checks(True)
+    dispatcharr = FakeDispatcharr(accounts=[ACCOUNT, other])
+    watcher, _gluetun, journal = with_masked_refusal(tmp_path, checks, dispatcharr)
+    watcher.tick(120.0)
+    assert checks.asked == []
+    skipped = [row for row in journal.read() if row["event"] == "skipped"]
+    assert skipped[-1]["feed"] == "690608.ts"

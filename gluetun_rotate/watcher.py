@@ -26,10 +26,10 @@ from .constants import (
     REFUSALS_BEFORE_ROTATING,
     ROTATION_COOLDOWN_SECONDS,
 )
-from .forbidden import Streaming, count_forbidden, describe, refused_urls
+from .forbidden import Streaming, count_forbidden, describe, feed_of, is_masked, refused_urls
 from .gluetun import Gluetun, Rotation
 from .journal import Journal
-from .provider import Account, Dispatcharr, Probe, SourceCheck, check_source, probe
+from .provider import Account, Dispatcharr, Probe, SourceCheck, check_source, probe, unmasked
 from .state import load, save
 from .tailer import Tailer
 from .viewers import describe_watched, from_the_provider, watched
@@ -128,11 +128,11 @@ class Watcher:
     def tick(self, now: float) -> None:
         self._restore_rotations(now)
         self._restart_a_tunnel_left_stopped()
-        refused_sources = self._record_forbidden()
+        refused_sources = self._record_forbidden_safely()
         accounts = self._current_accounts(now)
         if not accounts:
             return
-        blocked = self._check_blocked(refused_sources, accounts)
+        blocked = self._check_blocked(self._readable(refused_sources, accounts), accounts)
         refused = [result for result in map(self._prober, accounts) if result.refused]
         if refused:
             self._streak += 1
@@ -226,7 +226,29 @@ class Watcher:
         self._journal.write(
             "forbidden", total=sum(counts.values()), channels=describe(counts, streaming)
         )
-        return [url for url in refused_urls(lines) if from_the_provider(url)]
+        return [url for url in refused_urls(lines) if from_the_provider(url) or is_masked(url)]
+
+    def _record_forbidden_safely(self) -> list[str]:
+        try:
+            return self._record_forbidden()
+        except Exception as error:
+            detail = f"{type(error).__name__}: {error}"
+            self._journal.write("error", where="forbidden", detail=detail)
+            return []
+
+    def _readable(self, urls: list[str], accounts: list[Account]) -> list[str]:
+        readable = []
+        for url in urls:
+            source = unmasked(url, accounts)
+            if source is None:
+                self._journal.write(
+                    "skipped",
+                    reason="a masked source URL fits more than one account",
+                    feed=feed_of(url),
+                )
+                continue
+            readable.append(source)
+        return readable
 
     def _stream_log_status(self) -> str:
         if self._stream_log is None:

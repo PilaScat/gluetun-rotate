@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import urllib.parse
 from collections.abc import Iterable
 
-from .forbidden import Streaming
+from .forbidden import Streaming, host_of
 
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def from_the_provider(url: str) -> bool:
-    host = urllib.parse.urlparse(url).hostname or ""
+    host = host_of(url)
     return bool(host) and host not in LOCAL_HOSTS
 
 

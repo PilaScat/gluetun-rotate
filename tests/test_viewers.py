@@ -40,3 +40,7 @@ def test_the_names_go_into_the_journal() -> None:
     rows = [row("Sky | Sport Uno", PROVIDER, 1), row("DAZN | Web 1", PROVIDER, 3)]
     assert describe_watched(watched(rows)) == "Sky | Sport Uno and DAZN | Web 1"
     assert describe_watched([]) == ""
+
+
+def test_a_masked_provider_url_is_not_mistaken_for_a_local_one_and_does_not_raise():
+    assert from_the_provider("http://[provider_host]/live/[username]/[password]/1.ts") is False

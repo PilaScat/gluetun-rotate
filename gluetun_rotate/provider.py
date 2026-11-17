@@ -3,7 +3,7 @@ from __future__ import annotations
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,7 +13,7 @@ from .constants import (
     PROBE_TIMEOUT_SECONDS,
     REFUSED_STATUSES,
 )
-from .forbidden import Streaming, feed_of
+from .forbidden import Streaming, feed_of, host_of, is_masked, path_of
 from .web import ApiError, fetch, request_json
 
 XTREAM_CODES = "XC"
@@ -106,7 +106,22 @@ def check_source(
 
 
 def _host(url: str) -> str:
-    return urllib.parse.urlparse(url).hostname or ""
+    return host_of(url)
+
+
+def unmasked(url: str, accounts: Sequence[Account]) -> str | None:
+    if not is_masked(url):
+        return url
+    if len(accounts) != 1:
+        return None
+    account = accounts[0]
+    origin = urllib.parse.urlsplit(account.server_url)
+    path = path_of(url)
+    path = path.replace("[username]", urllib.parse.quote(account.username, safe=""))
+    path = path.replace("[password]", urllib.parse.quote(account.password, safe=""))
+    if "[" in path or not origin.netloc:
+        return None
+    return f"{origin.scheme}://{origin.netloc}{path}"
 
 
 def _rows(payload: object) -> list[dict]:
