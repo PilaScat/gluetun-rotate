@@ -249,6 +249,7 @@ class Plugin:
                 Journal(self._journal_path, MAX_RECENT_EVENTS).write("error", detail=problem)
             reported = problem
             stop_event.wait(SUPERVISE_RETRY_SECONDS if problem else SUPERVISE_INTERVAL_SECONDS)
+        process.reap_spawned()
 
     def _supervise_once(
         self, stop_event: threading.Event, read_settings: Callable[[], dict]

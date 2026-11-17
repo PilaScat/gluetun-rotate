@@ -446,3 +446,14 @@ def test_starting_a_watcher_records_the_version_that_started_it(
     state = loaded_module.state_module.load(isolated_runtime / "state.json")
     assert state["version"] == loaded_module.PLUGIN_VERSION
     assert state["version_token"] == state["token"]
+
+
+def test_the_supervisor_reaps_on_every_round_and_on_its_way_out(
+    loaded_module, isolated_runtime, monkeypatch
+):
+    reaped: list[bool] = []
+    monkeypatch.setattr(loaded_module.process, "reap_spawned", lambda: reaped.append(True))
+    monkeypatch.setattr(loaded_module.Plugin, "_keep_running", lambda self, *_a: "")
+    rounds = _OneRound()
+    loaded_module.Plugin()._supervise(rounds, lambda: {})
+    assert reaped == [True, True]
