@@ -42,8 +42,17 @@ def test_an_unknown_pid_is_not_a_zombie():
 
 
 @linux_only
-def test_the_spawned_watcher_inherits_no_descriptor_of_the_caller(tmp_path: Path, monkeypatch):
-    (tmp_path / "sleeper.py").write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+@pytest.mark.parametrize("close_from", [True, False])
+def test_the_spawned_watcher_inherits_no_descriptor_of_the_caller(
+    tmp_path: Path, monkeypatch, close_from
+):
+    if not close_from:
+        monkeypatch.delattr(os, "POSIX_SPAWN_CLOSEFROM", raising=False)
+    elif not hasattr(os, "POSIX_SPAWN_CLOSEFROM"):
+        pytest.skip("POSIX_SPAWN_CLOSEFROM needs Python 3.13")
+    (tmp_path / "sleeper.py").write_text(
+        "import time\nprint('ready', flush=True)\ntime.sleep(30)\n", encoding="utf-8"
+    )
     monkeypatch.setattr(process, "SERVER_MODULE", "sleeper")
     reader, writer = os.pipe()
     os.set_inheritable(reader, True)
@@ -51,7 +60,7 @@ def test_the_spawned_watcher_inherits_no_descriptor_of_the_caller(tmp_path: Path
     log = tmp_path / "watcher.log"
     pid = process.spawn(tmp_path, [], "token", log)
     try:
-        assert _wait_until(lambda: process.read_token(pid) == "token")
+        assert _wait_until(lambda: log.is_file() and "ready" in log.read_text())
         assert set(os.listdir(f"/proc/{pid}/fd")) == {"0", "1", "2"}
         assert os.readlink(f"/proc/{pid}/fd/1") == str(log)
         assert os.readlink(f"/proc/{pid}/fd/2") == str(log)
@@ -60,6 +69,19 @@ def test_the_spawned_watcher_inherits_no_descriptor_of_the_caller(tmp_path: Path
         os.close(reader)
         os.close(writer)
         process.terminate(pid, "token")
+
+
+@linux_only
+def test_spawn_returns_once_the_new_process_carries_its_token(tmp_path: Path, monkeypatch):
+    (tmp_path / "sleeper.py").write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    monkeypatch.setattr(process, "SERVER_MODULE", "sleeper")
+    for round_number in range(10):
+        token = f"token-{round_number}"
+        pid = process.spawn(tmp_path, [], token, tmp_path / "watcher.log")
+        try:
+            assert process.read_token(pid) == token
+        finally:
+            process.terminate(pid, token)
 
 
 def test_the_spawn_actions_redirect_the_three_standard_streams(tmp_path: Path):
