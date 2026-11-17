@@ -84,6 +84,18 @@ def test_spawn_returns_once_the_new_process_carries_its_token(tmp_path: Path, mo
             process.terminate(pid, token)
 
 
+@linux_only
+def test_a_spawned_process_that_ends_is_reaped_by_the_process_that_started_it(
+    tmp_path: Path, monkeypatch
+):
+    (tmp_path / "quick.py").write_text("pass\n", encoding="utf-8")
+    monkeypatch.setattr(process, "SERVER_MODULE", "quick")
+    pid = process.spawn(tmp_path, [], "token", tmp_path / "watcher.log")
+    assert _wait_until(lambda: process.is_zombie(pid))
+    process.reap_spawned()
+    assert not os.path.exists(f"/proc/{pid}")
+
+
 def test_the_spawn_actions_redirect_the_three_standard_streams(tmp_path: Path):
     if sys.platform == "win32":
         assert process.spawn_actions(tmp_path / "w.log") == []

@@ -15,6 +15,8 @@ from .constants import WATCHER_MODULE as SERVER_MODULE
 
 EXEC_WAIT_SECONDS = 2.0
 
+_spawned: set[int] = set()
+
 
 def resolve_interpreter() -> str:
     executable = Path(sys.executable or "")
@@ -78,8 +80,19 @@ def spawn(
     pid = os.posix_spawn(
         command[0], command, environment, file_actions=spawn_actions(log_path), setsid=True
     )
+    _spawned.add(pid)
     _await_exec(pid, run_token)
     return pid
+
+
+def reap_spawned() -> None:
+    for pid in list(_spawned):
+        try:
+            finished, _ = os.waitpid(pid, getattr(os, "WNOHANG", 0))
+        except ChildProcessError:
+            finished = pid
+        if finished == pid:
+            _spawned.discard(pid)
 
 
 def _await_exec(pid: int, run_token: str, timeout: float = EXEC_WAIT_SECONDS) -> None:
