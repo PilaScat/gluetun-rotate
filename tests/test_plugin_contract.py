@@ -165,6 +165,11 @@ def test_no_action_waits_for_a_channel_to_start(manifest):
     assert all("events" not in action for action in manifest["actions"])
 
 
+def test_the_manifest_declares_version_one_and_what_the_plugin_does(manifest):
+    assert manifest["manifest_version"] == 1
+    assert manifest["capabilities"] == ["outbound_network", "persistent_service", "subprocess"]
+
+
 def test_manifest_carries_what_the_registry_requires(manifest):
     for key in ("name", "version", "description", "author", "license"):
         assert manifest.get(key), key

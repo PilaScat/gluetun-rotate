@@ -8,6 +8,12 @@
   "repo_url": "https://github.com/PilaScat/gluetun-rotate",
   "help_url": "https://github.com/PilaScat/gluetun-rotate#readme",
   "source_url": "https://github.com/PilaScat/gluetun-rotate/releases/download/v{version}/gluetun-rotate-{version}.zip",
+  "manifest_version": 1,
+  "capabilities": [
+    "outbound_network",
+    "persistent_service",
+    "subprocess"
+  ],
   "fields": [
     {
       "id": "api_key",
